@@ -1,16 +1,15 @@
-# app.py
-
 import streamlit as st
 import pandas as pd
 from calculate_metrics import calculate_metrics
 import numpy as np
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="運動スコア自動採点アプリ", layout="centered")
 
 st.title("💪 運動スコア自動採点アプリ")
 st.write("CSVファイルをアップロードすると、自動でスコアリングを行います。")
 
-# ====== スコア関数（さっきの使い回し） ======
+# ====== スコア関数 ======
 def scale_score(value, min_val, max_val):
     if pd.isna(value):
         return np.nan
@@ -39,7 +38,6 @@ def score_csv(file_path):
             scores[f"{key}_score"] = scale_score(value, min_val, max_val)
 
     total = np.nanmean(list(scores.values()))
-    # ファイル名を安全に取得
     file_name = getattr(file_path, "name", str(file_path))
     result = {"file_name": file_name, **metrics, **scores, "total_score": total}
     return pd.DataFrame([result])
@@ -50,7 +48,6 @@ uploaded_file = st.file_uploader("CSVファイルをアップロード", type=["
 if uploaded_file is not None:
     st.success("✅ ファイルを読み込みました！採点中です…")
 
-    # CSVを一時保存
     temp_path = "uploaded_temp.csv"
     with open(temp_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
@@ -59,46 +56,50 @@ if uploaded_file is not None:
 
     st.subheader("📊 採点結果")
     st.dataframe(df_result)
-
     st.metric(label="総合スコア（0〜100）", value=f"{df_result['total_score'].iloc[0]:.1f} 点")
 
-    # ===== レーダーチャート表示 =====
-    import plotly.graph_objects as go
+    # ===== レーダーチャート =====
+    if not df_result.empty:
+        st.subheader("📈 各スコアのバランス（レーダーチャート）")
 
-    st.subheader("📈 各スコアのバランス（レーダーチャート）")
+        # 日本語ラベル対応
+        score_labels = ["頭のブレ", "肩の傾き", "体幹の傾き", "足上げ高さ", "足の横ブレ", "腕の垂れ下がり"]
+        english_keys = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
 
-    score_labels = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
-    values = [df_result[f"{label}_score"].values[0] for label in score_labels]
-    values += values[:1]
-    labels_closed = score_labels + [score_labels[0]]
+        values = [df_result[f"{key}_score"].values[0] for key in english_keys]
+        values += values[:1]
+        labels_closed = score_labels + [score_labels[0]]
 
-    fig = go.Figure(
-        data=go.Scatterpolar(
-            r=values,
-            theta=labels_closed,
-            fill="toself",
-            line_color="#4A90E2",
-            fillcolor="rgba(74, 144, 226, 0.3)",
-            name="スコア"
+        fig = go.Figure(
+            data=go.Scatterpolar(
+                r=values,
+                theta=labels_closed,
+                fill="toself",
+                line_color="#4A90E2",
+                fillcolor="rgba(74, 144, 226, 0.3)",
+                name="スコア"
+            )
         )
-    )
 
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 100],
-                showline=True,
-                linewidth=1,
-                gridcolor="lightgray"
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100],
+                    showline=True,
+                    linewidth=1,
+                    gridcolor="lightgray"
+                ),
+                angularaxis=dict(
+                    tickfont=dict(size=12, family="Arial Unicode MS")  # 日本語対応
+                ),
             ),
-        ),
-        showlegend=False,
-        width=600,
-        height=500,
-    )
+            showlegend=False,
+            width=600,
+            height=500,
+        )
 
-    st.plotly_chart(fig)
+        st.plotly_chart(fig)
 
 else:
     st.info("👆 上のボックスにCSVファイルをアップロードしてください")

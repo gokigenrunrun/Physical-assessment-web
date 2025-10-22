@@ -61,6 +61,7 @@ if uploaded_file is not None:
     # ===== レーダーチャート =====
     if not df_result.empty:
         st.subheader("📈 各スコアのバランス（レーダーチャート）")
+        st.write("✅ レーダーチャート作成中...")  # ← デバッグ確認用
 
         # 日本語ラベル対応
         score_labels = ["頭のブレ", "肩の傾き", "体幹の傾き", "足上げ高さ", "足の横ブレ", "腕の垂れ下がり"]

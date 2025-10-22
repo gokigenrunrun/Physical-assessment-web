@@ -29,7 +29,7 @@ def scale_score(value, min_val, max_val):
 def score_csv(file_path):
     metrics = calculate_metrics(file_path)
     score_ranges = {
-        "head_movement": (0.010, 0.050),
+        "head_movement": (0.002, 0.010),
         "shoulder_tilt": (0.01, 0.1),
         "torso_tilt": (0.01, 0.1),
         "leg_lift": (0.1, 0.6),

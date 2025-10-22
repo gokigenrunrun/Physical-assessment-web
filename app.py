@@ -78,6 +78,7 @@ if uploaded_file is not None:
 
             # 値を取得
             values = [float(df_result[f"{key}_score"].values[0]) for key in english_keys]
+            st.write("📊 各スコア値:", values)
             values += values[:1]  # 円を閉じる
             labels_closed = score_labels + [score_labels[0]]
 

@@ -59,7 +59,7 @@ if uploaded_file is not None:
     st.metric(label="総合スコア（0〜100）", value=f"{df_result['total_score'].iloc[0]:.1f} 点")
 
     # ===== レーダーチャート =====
-    if not df_result.empty:
+    if df_result is not None and len(df_result) > 0:
         # st.subheader("📈 各スコアのバランス（レーダーチャート）")
         # st.write("✅ レーダーチャート作成中...")  # ← デバッグ確認用
         st.write("📌 df_result:", df_result.shape)

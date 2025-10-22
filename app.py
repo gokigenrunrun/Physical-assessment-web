@@ -39,7 +39,9 @@ def score_csv(file_path):
             scores[f"{key}_score"] = scale_score(value, min_val, max_val)
 
     total = np.nanmean(list(scores.values()))
-    result = {"file_name": file_path.name, **metrics, **scores, "total_score": total}
+    # ファイル名を安全に取得
+    file_name = getattr(file_path, "name", str(file_path))
+    result = {"file_name": file_name, **metrics, **scores, "total_score": total}
     return pd.DataFrame([result])
 
 # ====== ファイルアップロード ======

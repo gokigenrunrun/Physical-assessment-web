@@ -60,48 +60,98 @@ if uploaded_file is not None:
 
     # ===== レーダーチャート =====
     if df_result is not None and len(df_result) > 0:
-        # st.subheader("📈 各スコアのバランス（レーダーチャート）")
-        # st.write("✅ レーダーチャート作成中...")  # ← デバッグ確認用
-        st.write("📌 df_result:", df_result.shape)
-        st.write("📌 df_result columns:", df_result.columns.tolist())
-        st.write("📌 チャート描画処理開始")
+        st.subheader("📈 各スコアのバランス（レーダーチャート）")
 
-        # 日本語ラベル対応
-        score_labels = ["頭のブレ", "肩の傾き", "体幹の傾き", "足上げ高さ", "足の横ブレ", "腕の垂れ下がり"]
-        english_keys = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
+        try:
+            # 日本語ラベル対応
+            score_labels = ["頭のブレ", "肩の傾き", "体幹の傾き", "足上げ高さ", "足の横ブレ", "腕の垂れ下がり"]
+            english_keys = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
 
-        values = [df_result[f"{key}_score"].values[0] for key in english_keys]
-        values += values[:1]
-        labels_closed = score_labels + [score_labels[0]]
+            values = [float(df_result[f"{key}_score"].values[0]) for key in english_keys]
+            values += values[:1]
+            labels_closed = score_labels + [score_labels[0]]
 
-        fig = go.Figure(
-            data=go.Scatterpolar(
-                r=values,
-                theta=labels_closed,
-                fill="toself",
-                line_color="#4A90E2",
-                fillcolor="rgba(74, 144, 226, 0.3)",
-                name="スコア"
+            fig = go.Figure(
+                data=go.Scatterpolar(
+                    r=values,
+                    theta=labels_closed,
+                    fill="toself",
+                    line_color="#4A90E2",
+                    fillcolor="rgba(74, 144, 226, 0.3)",
+                    name="スコア"
+                )
             )
-        )
 
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 100],
-                    showline=True,
-                    linewidth=1,
-                    gridcolor="lightgray"
+            fig.update_layout(
+                polar=dict(
+                    radialaxis=dict(
+                        visible=True,
+                        range=[0, 100],
+                        showline=True,
+                        linewidth=1,
+                        gridcolor="lightgray"
+                    ),
+                    angularaxis=dict(
+                        tickfont=dict(size=12, family="Arial Unicode MS")
+                    ),
                 ),
-                angularaxis=dict(
-                    tickfont=dict(size=12, family="Arial Unicode MS")  # 日本語対応
-                ),
-            ),
-            showlegend=False,
-            width=600,
-            height=500,
-        )
+                showlegend=False,
+                width=600,
+                height=500,
+                margin=dict(l=40, r=40, t=40, b=40),
+            )
+
+            # ✅ Streamlitで確実に描画する
+            st.plotly_chart(fig, use_container_width=True)
+            st.success("✅ レーダーチャートの描画が完了しました！")
+
+        except Exception as e:
+            st.error(f"⚠️ チャート描画中にエラーが発生しました: {e}")
+
+    # # ===== レーダーチャート =====
+    # if df_result is not None and len(df_result) > 0:
+    #     # st.subheader("📈 各スコアのバランス（レーダーチャート）")
+    #     # st.write("✅ レーダーチャート作成中...")  # ← デバッグ確認用
+    #     st.write("📌 df_result:", df_result.shape)
+    #     st.write("📌 df_result columns:", df_result.columns.tolist())
+    #     st.write("📌 チャート描画処理開始")
+
+    #     # 日本語ラベル対応
+    #     score_labels = ["頭のブレ", "肩の傾き", "体幹の傾き", "足上げ高さ", "足の横ブレ", "腕の垂れ下がり"]
+    #     english_keys = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
+
+    #     values = [df_result[f"{key}_score"].values[0] for key in english_keys]
+    #     values += values[:1]
+    #     labels_closed = score_labels + [score_labels[0]]
+
+    #     fig = go.Figure(
+    #         data=go.Scatterpolar(
+    #             r=values,
+    #             theta=labels_closed,
+    #             fill="toself",
+    #             line_color="#4A90E2",
+    #             fillcolor="rgba(74, 144, 226, 0.3)",
+    #             name="スコア"
+    #         )
+    #     )
+
+    #     fig.update_layout(
+    #         polar=dict(
+    #             radialaxis=dict(
+    #                 visible=True,
+    #                 range=[0, 100],
+    #                 showline=True,
+    #                 linewidth=1,
+    #                 gridcolor="lightgray"
+    #             ),
+    #             angularaxis=dict(
+    #                 tickfont=dict(size=12, family="Arial Unicode MS")  # 日本語対応
+    #             ),
+    #         ),
+    #         showlegend=False,
+    #         width=600,
+    #         height=500,
+    #     )
 
         st.plotly_chart(fig)
 

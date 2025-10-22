@@ -61,50 +61,44 @@ if uploaded_file is not None:
     st.dataframe(df_result)
 
     st.metric(label="総合スコア（0〜100）", value=f"{df_result['total_score'].iloc[0]:.1f} 点")
+
+    # ===== レーダーチャート表示 =====
+    import plotly.graph_objects as go
+
+    st.subheader("📈 各スコアのバランス（レーダーチャート）")
+
+    score_labels = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
+    values = [df_result[f"{label}_score"].values[0] for label in score_labels]
+    values += values[:1]
+    labels_closed = score_labels + [score_labels[0]]
+
+    fig = go.Figure(
+        data=go.Scatterpolar(
+            r=values,
+            theta=labels_closed,
+            fill="toself",
+            line_color="#4A90E2",
+            fillcolor="rgba(74, 144, 226, 0.3)",
+            name="スコア"
+        )
+    )
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                showline=True,
+                linewidth=1,
+                gridcolor="lightgray"
+            ),
+        ),
+        showlegend=False,
+        width=600,
+        height=500,
+    )
+
+    st.plotly_chart(fig)
+
 else:
     st.info("👆 上のボックスにCSVファイルをアップロードしてください")
-import plotly.graph_objects as go
-
-# ===== レーダーチャート表示 =====
-st.subheader("📊 各スコアのバランス（レーダーチャート）")
-
-# 可視化するスコア項目
-score_labels = ["head_movement", "shoulder_tilt", "torso_tilt", "leg_lift", "foot_sway", "arm_sag"]
-
-# スコア値をリストに変換（0〜100）
-values = [df_result[f"{label}_score"].values[0] for label in score_labels]
-
-# レーダーチャートの形を閉じるために最初の値を最後にも追加
-values += values[:1]
-labels_closed = score_labels + [score_labels[0]]
-
-# Plotlyで作図
-fig = go.Figure(
-    data=go.Scatterpolar(
-        r=values,
-        theta=labels_closed,
-        fill="toself",
-        line_color="#4A90E2",
-        fillcolor="rgba(74, 144, 226, 0.3)",
-        name="スコア"
-    )
-)
-
-# 軸・スタイル設定
-fig.update_layout(
-    polar=dict(
-        radialaxis=dict(
-            visible=True,
-            range=[0, 100],
-            showline=True,
-            linewidth=1,
-            gridcolor="lightgray"
-        ),
-    ),
-    showlegend=False,
-    width=600,
-    height=500,
-)
-
-# Streamlitで表示
-st.plotly_chart(fig)    

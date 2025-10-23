@@ -4,6 +4,7 @@ from calculate_metrics import calculate_metrics
 import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
+import streamlit.components.v1 as components
 
 # 🔧 Streamlit CloudでPlotlyが表示されない問題の対策
 pio.renderers.default = "iframe"
@@ -120,8 +121,11 @@ if uploaded_file is not None:
                 margin=dict(l=40, r=40, t=40, b=40),
             )
 
-            # Streamlit上で描画
-            st.plotly_chart(fig, use_container_width=True)
+            # Streamlit上で描画（HTML埋め込みを使用）
+            components.html(
+                fig.to_html(include_plotlyjs="cdn", full_html=False),
+                height=550,
+            )
             st.success("✅ レーダーチャートを表示しました！")
 
         except Exception as e:

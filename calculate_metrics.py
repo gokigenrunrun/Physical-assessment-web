@@ -24,7 +24,10 @@ def calculate_metrics(file_path: str) -> dict:
         head["diff"] = np.sqrt(
             head["x"].diff()**2 + head["y"].diff()**2 + head["z"].diff()**2
         )
-        result["head_movement"] = head["diff"].mean(skipna=True)
+        if head.empty:
+            result["head_movement"] = np.nan
+        else:
+            result["head_movement"] = head["diff"].fillna(0).mean(skipna=True)
     except Exception as e:
         print(f"⚠️ head_movement error ({file_path}): {e}")
         result["head_movement"] = np.nan
@@ -68,7 +71,10 @@ def calculate_metrics(file_path: str) -> dict:
     # ===== 接地足の横ブレ（foot_sway）=====
     try:
         foot = df[df["landmark_index"] == 28]
-        result["foot_sway"] = foot["x"].std(skipna=True)
+        if foot.empty:
+            result["foot_sway"] = np.nan
+        else:
+            result["foot_sway"] = foot["x"].std(skipna=True, ddof=0)
     except Exception as e:
         print(f"⚠️ foot_sway error ({file_path}): {e}")
         result["foot_sway"] = np.nan

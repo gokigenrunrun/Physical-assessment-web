@@ -79,18 +79,23 @@ if uploaded_file is not None:
             # 値を取得
             raw_scores = [df_result[f"{key}_score"].values[0] for key in english_keys]
             missing_labels = [label for label, val in zip(score_labels, raw_scores) if pd.isna(val)]
-            values = np.nan_to_num(raw_scores, nan=0.0).tolist()
+            values = [
+                float(val) if val is not None and not pd.isna(val) else 0.0
+                for val in raw_scores
+            ]
             st.write("📊 各スコア値:", values)
-            values += values[:1]  # 円を閉じる
+            values_closed = values + values[:1]  # 円を閉じる
             labels_closed = score_labels + [score_labels[0]]
 
             if missing_labels:
                 st.info(f"一部スコアが計算できませんでした（{', '.join(missing_labels)}）。0 として表示しています。")
+            if not any(values):
+                st.warning("すべてのスコアが 0 です。計測データを確認してください。")
 
             # Plotlyで描画
             fig = go.Figure(
                 data=go.Scatterpolar(
-                    r=values,
+                    r=values_closed,
                     theta=labels_closed,
                     fill="toself",
                     line_color="#4A90E2",

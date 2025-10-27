@@ -1,12 +1,13 @@
 # pose_extract.py
 import csv
 from pathlib import Path
-from typing import Generator, Iterable, Optional, Tuple
+from typing import Callable, Generator, Iterable, Optional, Tuple
 
 import cv2
 import mediapipe as mp
 import numpy as np
 import pandas as pd
+import time
 from mediapipe.framework.formats import landmark_pb2
 
 # 軽量のSolutions API
@@ -42,7 +43,7 @@ def pose_capture_generator(
     resize_scale: float = 1.0,
     frame_stride: int = 1,
     max_frames: Optional[int] = None,
-) -> Generator[Tuple[int, np.ndarray, Optional[landmark_pb2.NormalizedLandmarkList]], None, None]:
+) -> Generator[Tuple[int, np.ndarray, np.ndarray, Optional[landmark_pb2.NormalizedLandmarkList]], None, None]:
     """
     MediaPipe Pose推論を行いながらランドマークを逐次返すジェネレーター。
     """
@@ -74,7 +75,7 @@ def pose_capture_generator(
             frame_rgb = cv2.cvtColor(frame_for_processing, cv2.COLOR_BGR2RGB)
             result = pose.process(frame_rgb)
 
-            yield frame_idx, frame_for_processing, result.pose_landmarks
+            yield frame_idx, frame_bgr, frame_for_processing, result.pose_landmarks
 
             processed += 1
             frame_idx += 1
@@ -114,7 +115,7 @@ def video_to_pose_csv(
         writer = csv.writer(f)
         writer.writerow(LANDMARK_HEADER)
         try:
-            for frame_idx, _, landmarks in pose_capture_generator(
+            for frame_idx, _, _, landmarks in pose_capture_generator(
                 cap=cap,
                 resize_scale=resize_scale,
                 frame_stride=frame_stride,
@@ -136,6 +137,8 @@ def capture_pose_from_camera(
     target_fps: int = 15,
     max_frames: Optional[int] = None,
     out_csv_path: Optional[str] = None,
+    frame_callback: Optional[Callable[[int, np.ndarray], None]] = None,
+    return_start_timestamp: bool = False,
 ) -> pd.DataFrame:
     """
     Webカメラから一定時間ポーズ推論を行い、ランドマークをDataFrameで返す。
@@ -151,14 +154,20 @@ def capture_pose_from_camera(
         max_frames = int(fps * capture_seconds)
 
     rows = []
+    start_timestamp: Optional[float] = None
     try:
-        for frame_idx, _, landmarks in pose_capture_generator(
+        for frame_idx, frame_original_bgr, frame_processed_bgr, landmarks in pose_capture_generator(
             cap=cap,
             resize_scale=resize_scale,
             frame_stride=frame_stride,
             max_frames=max_frames,
         ):
+            if frame_callback is not None:
+                frame_rgb = cv2.cvtColor(frame_original_bgr, cv2.COLOR_BGR2RGB)
+                frame_callback(frame_idx, frame_rgb)
             if landmarks:
+                if start_timestamp is None:
+                    start_timestamp = time.time()
                 for idx, lm in enumerate(landmarks.landmark):
                     rows.append(
                         (
@@ -177,4 +186,6 @@ def capture_pose_from_camera(
     if out_csv_path:
         Path(out_csv_path).parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(out_csv_path, index=False)
+    if return_start_timestamp:
+        return df, start_timestamp
     return df

@@ -36,6 +36,20 @@ def _source_label(source: Union[str, Path, pd.DataFrame]) -> str:
     return "dataframe"
 
 
+def classify_action(frame_idx: int, fps: float = 30.0) -> str:
+    cycle_len = int(round(fps * 6.7))
+    if cycle_len <= 0:
+        cycle_len = 200
+    phase = (frame_idx % cycle_len) // 50
+    if phase == 0:
+        return "right_leg"
+    if phase == 1:
+        return "raise"
+    if phase == 2:
+        return "left_leg"
+    return "raise"
+
+
 def _extract_frame_indices(series: pd.Series) -> pd.Series:
     """
     Try to parse numeric frame indices from mixed string/integer columns.
@@ -293,7 +307,7 @@ def calculate_metrics_by_frame(data: Union[str, Path, pd.DataFrame]) -> pd.DataF
 
     records: List[Dict[str, float]] = []
     for frame in frames:
-        metrics: Dict[str, float] = {"frame": frame}
+        metrics: Dict[str, float] = {"frame": frame, "action": classify_action(frame)}
 
         metrics["head_movement"] = float(head_movement_series.get(frame, np.nan))
 
@@ -341,7 +355,7 @@ def calculate_metrics_by_frame(data: Union[str, Path, pd.DataFrame]) -> pd.DataF
 def plot_frame_metrics(df: pd.DataFrame, title: str = "Frame-wise Motion Dynamics") -> None:
     plt.figure(figsize=(10, 5))
     for col in df.columns:
-        if col == "frame":
+        if col in {"frame", "action"}:
             continue
         plt.plot(df["frame"], df[col], label=col)
 

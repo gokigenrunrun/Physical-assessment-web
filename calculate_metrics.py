@@ -1,7 +1,8 @@
+import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 
 SCORE_COLUMNS: List[str] = [
@@ -12,6 +13,112 @@ SCORE_COLUMNS: List[str] = [
     "foot_sway",
     "arm_sag",
 ]
+
+DEFAULT_SCORE_RANGES_RIGHT: Dict[str, Tuple[float, float]] = {
+    "head_movement": (-0.039802, 0.096293),
+    "shoulder_tilt": (-0.004085, 0.100632),
+    "torso_tilt": (-0.009802, 0.056854),
+    "leg_lift": (0.066994, 0.493938),
+    "foot_sway": (-0.025375, 0.113312),
+    "arm_sag": (-0.022492, 0.132132),
+}
+
+DEFAULT_SCORE_RANGES_LEFT: Dict[str, Tuple[float, float]] = {
+    "head_movement": (-0.045299, 0.096693),
+    "shoulder_tilt": (-0.006431, 0.083754),
+    "torso_tilt": (-0.005356, 0.044649),
+    "leg_lift": (0.359228, 0.615523),
+    "foot_sway": (-0.073904, 0.214358),
+    "arm_sag": (-0.031104, 0.168304),
+}
+
+_MODULE_DIR = Path(__file__).resolve().parent
+_DEFAULT_SCORE_RANGE_FILES: Dict[str, Path] = {
+    "right_leg": _MODULE_DIR / "score_ranges_right_leg.json",
+    "left_leg": _MODULE_DIR / "score_ranges_left_leg.json",
+}
+_DEFAULT_ACTION_KEY = "right_leg"
+
+
+def _coerce_range_pair(value: Union[Dict[str, float], Iterable[float]]) -> Optional[Tuple[float, float]]:
+    """
+    Convert JSON values into a (low, high) tuple when possible.
+    """
+    low: Optional[float]
+    high: Optional[float]
+
+    if isinstance(value, dict):
+        low = value.get("low")
+        high = value.get("high")
+    elif isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            return None
+        low, high = value
+    else:
+        return None
+
+    try:
+        return float(low), float(high)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_ranges_from_json(path: Path) -> Dict[str, Tuple[float, float]]:
+    with path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    loaded: Dict[str, Tuple[float, float]] = {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            pair = _coerce_range_pair(value)
+            if pair is not None:
+                loaded[key] = pair
+    return loaded
+
+
+def load_score_ranges(base_dir: Optional[Union[str, Path]] = None) -> Dict[str, Dict[str, Tuple[float, float]]]:
+    """
+    Load score ranges for each action phase, falling back to defaults when JSON
+    overrides are unavailable or invalid.
+    """
+    base_path = Path(base_dir) if base_dir is not None else _MODULE_DIR
+    ranges: Dict[str, Dict[str, Tuple[float, float]]] = {
+        "right_leg": DEFAULT_SCORE_RANGES_RIGHT.copy(),
+        "left_leg": DEFAULT_SCORE_RANGES_LEFT.copy(),
+    }
+
+    for action_key, file_path in _DEFAULT_SCORE_RANGE_FILES.items():
+        target_path = base_path / file_path.name if base_dir is not None else file_path
+        if target_path.is_file():
+            try:
+                overrides = _load_ranges_from_json(target_path)
+                ranges[action_key].update(overrides)
+            except Exception as exc:
+                print(f"⚠️ score range load error ({target_path}): {exc}")
+
+    # Provide sensible fallbacks for phases without dedicated ranges
+    ranges["raise"] = ranges["right_leg"].copy()
+    ranges["unknown"] = ranges["right_leg"].copy()
+    ranges["default"] = ranges["right_leg"].copy()
+    return ranges
+
+
+SCORE_RANGES = load_score_ranges()
+
+
+def get_score_range(metric: str, action: Optional[str] = None) -> Tuple[float, float]:
+    """
+    Return the (low, high) range for the given metric and action.
+    """
+    action_key = action if action in SCORE_RANGES else _DEFAULT_ACTION_KEY
+    ranges_for_action = SCORE_RANGES.get(action_key) or SCORE_RANGES[_DEFAULT_ACTION_KEY]
+    if metric in ranges_for_action:
+        return ranges_for_action[metric]
+
+    fallback_ranges = SCORE_RANGES[_DEFAULT_ACTION_KEY]
+    if metric in fallback_ranges:
+        return fallback_ranges[metric]
+    raise KeyError(f"Unknown score range for metric '{metric}'")
 
 COLUMN_ALIASES = {
     "landmark_idx": "landmark_index",
@@ -25,6 +132,22 @@ COLUMN_ALIASES = {
 
 NUMERIC_COLUMNS = ["x", "y", "z", "visibility"]
 
+REFERENCE_ACTION_PHASES = [
+    (0.0, 0.867, "raise"),
+    (0.867, 2.0, "right_leg"),
+    (2.0, 3.033, "raise"),
+    (3.033, 4.267, "left_leg"),
+    (4.267, 5.4, "raise"),
+    (5.4, 6.467, "right_leg"),
+    (6.467, 7.533, "raise"),
+    (7.533, 8.767, "left_leg"),
+    (8.767, 9.9, "raise"),
+    (9.9, 11.033, "right_leg"),
+    (11.033, 11.667, "raise"),
+]
+
+REFERENCE_MAX_FRAME = 350
+
 
 def _empty_metric_dict() -> Dict[str, float]:
     return {k: np.nan for k in SCORE_COLUMNS}
@@ -37,17 +160,22 @@ def _source_label(source: Union[str, Path, pd.DataFrame]) -> str:
 
 
 def classify_action(frame_idx: int, fps: float = 30.0) -> str:
-    cycle_len = int(round(fps * 6.7))
-    if cycle_len <= 0:
-        cycle_len = 200
-    phase = (frame_idx % cycle_len) // 50
-    if phase == 0:
-        return "right_leg"
-    if phase == 1:
-        return "raise"
-    if phase == 2:
-        return "left_leg"
-    return "raise"
+    if frame_idx < 0 or frame_idx > REFERENCE_MAX_FRAME:
+        return "unknown"
+    if fps <= 0:
+        fps = 30.0
+
+    time_position = frame_idx / fps
+
+    for start, end, label in REFERENCE_ACTION_PHASES:
+        if start <= time_position < end:
+            return label
+
+    last_start, last_end, last_label = REFERENCE_ACTION_PHASES[-1]
+    if last_start <= time_position <= last_end:
+        return last_label
+
+    return "unknown"
 
 
 def _extract_frame_indices(series: pd.Series) -> pd.Series:
@@ -193,6 +321,8 @@ def _get_landmark_series(
 
 def _compute_metrics(df: pd.DataFrame, source_label: str = "dataframe") -> Dict[str, float]:
     result: Dict[str, float] = {}
+    frames = sorted(df["frame"].unique())
+    action_by_frame = {frame: classify_action(frame) for frame in frames}
 
     try:
         head = _get_landmark_series(df, 0, ["x", "y", "z"])
@@ -230,23 +360,51 @@ def _compute_metrics(df: pd.DataFrame, source_label: str = "dataframe") -> Dict[
         result["torso_tilt"] = np.nan
 
     try:
-        hip = _get_landmark_series(df, 24, ["y"])
-        ankle = _get_landmark_series(df, 28, ["y"])
-        if hip.empty or ankle.empty:
+        right_hip = _get_landmark_series(df, 24, ["y"])
+        right_ankle = _get_landmark_series(df, 28, ["y"])
+        left_hip = _get_landmark_series(df, 23, ["y"])
+        left_ankle = _get_landmark_series(df, 27, ["y"])
+
+        leg_samples: List[float] = []
+        for frame in frames:
+            action = action_by_frame.get(frame)
+            if action == "left_leg":
+                if frame in left_hip.index and frame in left_ankle.index:
+                    value = float(left_ankle.loc[frame, "y"] - left_hip.loc[frame, "y"])
+                    leg_samples.append(value)
+            else:
+                if frame in right_hip.index and frame in right_ankle.index:
+                    value = float(right_ankle.loc[frame, "y"] - right_hip.loc[frame, "y"])
+                    leg_samples.append(value)
+
+        leg_array = np.array(leg_samples, dtype=float) if leg_samples else np.array([], dtype=float)
+        if leg_array.size == 0 or np.all(np.isnan(leg_array)):
             result["leg_lift"] = np.nan
         else:
-            delta = (ankle["y"] - hip["y"]).to_numpy(dtype=float)
-            if np.all(np.isnan(delta)):
-                result["leg_lift"] = np.nan
-            else:
-                result["leg_lift"] = float(np.nanpercentile(delta, 5))
+            result["leg_lift"] = float(np.nanpercentile(leg_array, 5))
     except Exception as exc:
         print(f"⚠️ leg_lift error ({source_label}): {exc}")
         result["leg_lift"] = np.nan
 
     try:
-        foot = _get_landmark_series(df, 27, ["x"])
-        result["foot_sway"] = float(foot["x"].std(ddof=0)) if not foot.empty else np.nan
+        right_stance = _get_landmark_series(df, 27, ["x"])
+        left_stance = _get_landmark_series(df, 28, ["x"])
+
+        foot_samples: List[float] = []
+        for frame in frames:
+            action = action_by_frame.get(frame)
+            if action == "left_leg":
+                if frame in left_stance.index:
+                    foot_samples.append(float(left_stance.loc[frame, "x"]))
+            else:
+                if frame in right_stance.index:
+                    foot_samples.append(float(right_stance.loc[frame, "x"]))
+
+        foot_array = np.array(foot_samples, dtype=float) if foot_samples else np.array([], dtype=float)
+        if foot_array.size == 0 or np.all(np.isnan(foot_array)):
+            result["foot_sway"] = np.nan
+        else:
+            result["foot_sway"] = float(np.nanstd(foot_array, ddof=0))
     except Exception as exc:
         print(f"⚠️ foot_sway error ({source_label}): {exc}")
         result["foot_sway"] = np.nan
@@ -297,17 +455,22 @@ def calculate_metrics_by_frame(data: Union[str, Path, pd.DataFrame]) -> pd.DataF
     right_shoulder = _get_landmark_series(df, 12, ["y"])
     left_hip = _get_landmark_series(df, 23, ["y"])
     right_hip = _get_landmark_series(df, 24, ["y"])
-    hip = _get_landmark_series(df, 24, ["y"])
-    ankle = _get_landmark_series(df, 28, ["y"])
-    stance_foot = _get_landmark_series(df, 27, ["x"])
-    foot_baseline_series = stance_foot["x"].dropna()
-    foot_baseline = float(foot_baseline_series.iloc[0]) if not foot_baseline_series.empty else np.nan
+    right_ankle = _get_landmark_series(df, 28, ["y"])
+    left_ankle = _get_landmark_series(df, 27, ["y"])
+    right_foot = _get_landmark_series(df, 27, ["x"])
+    left_foot = _get_landmark_series(df, 28, ["x"])
+
+    right_baseline_series = right_foot["x"].dropna()
+    right_baseline = float(right_baseline_series.iloc[0]) if not right_baseline_series.empty else np.nan
+    left_baseline_series = left_foot["x"].dropna()
+    left_baseline = float(left_baseline_series.iloc[0]) if not left_baseline_series.empty else np.nan
     left_elbow = _get_landmark_series(df, 13, ["y"])
     right_elbow = _get_landmark_series(df, 14, ["y"])
 
     records: List[Dict[str, float]] = []
     for frame in frames:
-        metrics: Dict[str, float] = {"frame": frame, "action": classify_action(frame)}
+        action = classify_action(frame)
+        metrics: Dict[str, float] = {"frame": frame, "action": action}
 
         metrics["head_movement"] = float(head_movement_series.get(frame, np.nan))
 
@@ -325,15 +488,24 @@ def calculate_metrics_by_frame(data: Union[str, Path, pd.DataFrame]) -> pd.DataF
         else:
             metrics["torso_tilt"] = np.nan
 
-        if frame in hip.index and frame in ankle.index:
-            metrics["leg_lift"] = float(ankle.loc[frame, "y"] - hip.loc[frame, "y"])
+        if action == "left_leg":
+            if frame in left_hip.index and frame in left_ankle.index:
+                metrics["leg_lift"] = float(left_ankle.loc[frame, "y"] - left_hip.loc[frame, "y"])
+            else:
+                metrics["leg_lift"] = np.nan
+            if frame in left_foot.index and not np.isnan(left_baseline):
+                metrics["foot_sway"] = float(abs(left_foot.loc[frame, "x"] - left_baseline))
+            else:
+                metrics["foot_sway"] = np.nan
         else:
-            metrics["leg_lift"] = np.nan
-
-        if frame in stance_foot.index and not np.isnan(foot_baseline):
-            metrics["foot_sway"] = float(abs(stance_foot.loc[frame, "x"] - foot_baseline))
-        else:
-            metrics["foot_sway"] = np.nan
+            if frame in right_hip.index and frame in right_ankle.index:
+                metrics["leg_lift"] = float(right_ankle.loc[frame, "y"] - right_hip.loc[frame, "y"])
+            else:
+                metrics["leg_lift"] = np.nan
+            if frame in right_foot.index and not np.isnan(right_baseline):
+                metrics["foot_sway"] = float(abs(right_foot.loc[frame, "x"] - right_baseline))
+            else:
+                metrics["foot_sway"] = np.nan
 
         arm_vals: List[float] = []
         if frame in left_shoulder.index and frame in left_elbow.index:

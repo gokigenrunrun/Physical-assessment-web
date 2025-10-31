@@ -1,7 +1,7 @@
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import base64
 import cv2
@@ -15,6 +15,7 @@ from calculate_metrics import (
     calculate_metrics_by_frame,
     calculate_metrics_from_df,
     classify_action,
+    get_score_range,
     preprocess_landmarks,
 )
 from pose_extract import capture_pose_from_camera, video_to_pose_csv
@@ -22,14 +23,6 @@ from pose_extract import capture_pose_from_camera, video_to_pose_csv
 st.set_page_config(page_title="運動スコア自動採点アプリ", layout="centered")
 
 REFERENCE_VIDEO_PATH = Path("otehon.mp4")
-SCORE_RANGES = {
-    "head_movement": (0.0001, 0.0088),
-    "shoulder_tilt": (0.01, 0.1),
-    "torso_tilt": (0.01, 0.1),
-    "leg_lift": (0.1, 0.6),
-    "foot_sway": (0.005, 0.1),
-    "arm_sag": (0.01, 0.4),
-}
 METRIC_LABELS = {
     "head_movement": "頭のブレ",
     "shoulder_tilt": "肩の傾き",
@@ -156,19 +149,21 @@ def init_session_state() -> None:
         "measurement_ready": False,
         "result_df": None,
         "frame_metrics_df": None,
-    "frame_scores_df": None,
-    "pose_dataframe": None,
-    "pose_csv_bytes": None,
-    "frame_scores_csv": None,
-    "source_label": None,
-    "wait_until": None,
-    "temp_paths": [],
-    "countdown_active": False,
-    "countdown_start": None,
-    "countdown_duration": 3,
-    "camera_warmed": False,
-    "measurement_start_timestamp": None,
-}
+        "frame_scores_df": None,
+        "pose_dataframe": None,
+        "pose_csv_bytes": None,
+        "frame_scores_csv": None,
+        "source_label": None,
+        "wait_until": None,
+        "temp_paths": [],
+        "countdown_active": False,
+        "countdown_start": None,
+        "countdown_duration": 3,
+        "camera_warmed": False,
+        "warmup_camera": None,
+        "warmup_camera_initialized": False,
+        "measurement_start_timestamp": None,
+    }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
@@ -183,8 +178,21 @@ def cleanup_temp_paths() -> None:
     st.session_state["temp_paths"] = []
 
 
+def release_warmup_camera() -> None:
+    cap = st.session_state.get("warmup_camera")
+    if cap is not None:
+        try:
+            cap.release()
+        except Exception:
+            pass
+    st.session_state["warmup_camera"] = None
+    st.session_state["warmup_camera_initialized"] = False
+    st.session_state["camera_warmed"] = False
+
+
 def reset_measurement_state() -> None:
     cleanup_temp_paths()
+    release_warmup_camera()
     keys_to_reset = [
         "measurement_config",
         "measurement_ready",
@@ -207,32 +215,64 @@ def reset_measurement_state() -> None:
 
 
 def scale_score(value: float, min_val: float, max_val: float) -> float:
-    if pd.isna(value):
+    if pd.isna(value) or pd.isna(min_val) or pd.isna(max_val):
         return np.nan
-    if value >= max_val:
-        return 0.0
-    if value <= min_val:
+    low = min(min_val, max_val)
+    high = max(min_val, max_val)
+    if np.isclose(low, high):
+        return 100.0 if value <= low else 0.0
+    if value <= low:
         return 100.0
-    return float((1 - (value - min_val) / (max_val - min_val)) * 100)
+    if value >= high:
+        return 0.0
+    ratio = (value - low) / (high - low)
+    score = 100.0 * (1.0 - ratio)
+    return float(np.clip(score, 0.0, 100.0))
 
 
-def score_data(pose_df: pd.DataFrame, label: str) -> pd.DataFrame:
+def score_data(
+    pose_df: pd.DataFrame,
+    label: str,
+    frame_metrics: Optional[pd.DataFrame] = None,
+) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     metrics = calculate_metrics_from_df(pose_df)
-    scores: Dict[str, float] = {}
-    for key, (mn, mx) in SCORE_RANGES.items():
-        scores[f"{key}_score"] = scale_score(metrics.get(key, np.nan), mn, mx)
-    total = float(np.nanmean(list(scores.values()))) if scores else np.nan
-    result = {"file_name": label, **metrics, **scores, "total_score": total}
-    return pd.DataFrame([result])
+    if frame_metrics is None:
+        frame_metrics = calculate_metrics_by_frame(pose_df)
+
+    frame_scores_df = build_frame_score_table(frame_metrics) if frame_metrics is not None else None
+
+    metric_scores: Dict[str, float] = {}
+    if frame_scores_df is not None and not frame_scores_df.empty:
+        for key in SCORE_COLUMNS:
+            score_col = f"{key}_score"
+            if score_col in frame_scores_df.columns:
+                metric_scores[score_col] = float(frame_scores_df[score_col].mean(skipna=True))
+            else:
+                metric_scores[score_col] = np.nan
+    else:
+        for key in SCORE_COLUMNS:
+            low, high = get_score_range(key, None)
+            metric_scores[f"{key}_score"] = scale_score(metrics.get(key, np.nan), low, high)
+
+    total = float(
+        np.nanmean([metric_scores[f"{k}_score"] for k in SCORE_COLUMNS])
+    ) if SCORE_COLUMNS else np.nan
+
+    result = {"file_name": label, **metrics, **metric_scores, "total_score": total}
+    return pd.DataFrame([result]), frame_scores_df
 
 
 def build_frame_score_table(frame_metrics: pd.DataFrame) -> pd.DataFrame:
     if frame_metrics is None or frame_metrics.empty:
         return pd.DataFrame()
     score_df = frame_metrics.copy()
-    for key, (mn, mx) in SCORE_RANGES.items():
+    for key in SCORE_COLUMNS:
         if key in score_df.columns:
-            score_df[f"{key}_score"] = score_df[key].apply(lambda v: scale_score(v, mn, mx))
+            def _score_row(row: pd.Series) -> float:
+                low, high = get_score_range(key, row.get("action"))
+                return scale_score(row[key], low, high)
+
+            score_df[f"{key}_score"] = score_df.apply(_score_row, axis=1)
     score_cols = [col for col in score_df.columns if col.endswith("_score")]
     if score_cols:
         score_df["average_score"] = score_df[score_cols].mean(axis=1, skipna=True)
@@ -300,10 +340,9 @@ def run_measurement(config: Dict) -> Dict:
             frame_stride=config["frame_stride"],
         )
     elif mode == "webcam":
-        if not config.get("skip_warmup", False):
-            warm_up_camera(config.get("camera_index", 0))
         raw_df = capture_pose_from_camera(
             camera_index=config.get("camera_index", 0),
+            warmup_camera=config.get("warmup_camera"),
             resize_scale=config["resize_scale"],
             frame_stride=config["frame_stride"],
             capture_seconds=config["capture_seconds"],
@@ -318,9 +357,8 @@ def run_measurement(config: Dict) -> Dict:
     else:
         raise ValueError(f"Unsupported mode: {mode}")
 
-    result_df = score_data(pose_df, label)
     frame_metrics_df = calculate_metrics_by_frame(pose_df)
-    frame_scores_df = build_frame_score_table(frame_metrics_df)
+    result_df, frame_scores_df = score_data(pose_df, label, frame_metrics_df)
 
     pose_csv_bytes = pose_df.to_csv(index=False).encode("utf-8")
     frame_scores_csv = None
@@ -343,6 +381,29 @@ def render_start_view() -> None:
     st.title("💪 運動スコア自動採点アプリ")
     st.write("スタートボタンを押して計測を開始しましょう。")
 
+    if not st.session_state.get("warmup_camera_initialized", False):
+        camera_index = 0
+        cap = None
+        try:
+            cap = cv2.VideoCapture(camera_index)
+            if not cap.isOpened():
+                raise RuntimeError("カメラを初期化できませんでした。")
+            for _ in range(10):
+                ok, _ = cap.read()
+                if not ok:
+                    break
+            st.session_state["warmup_camera"] = cap
+            st.session_state["warmup_camera_initialized"] = True
+            st.session_state["camera_warmed"] = True
+            st.info("📸 カメラのウォームアップが完了しました。")
+        except Exception as exc:
+            if cap is not None:
+                cap.release()
+            release_warmup_camera()
+            st.warning(f"カメラのウォームアップに失敗しました: {exc}")
+    elif st.session_state.get("camera_warmed"):
+        st.caption("📸 カメラの準備が整っています。")
+
     if st.session_state.get("countdown_active", False):
         measurement_config = st.session_state.get("measurement_config")
         if measurement_config is None:
@@ -351,17 +412,6 @@ def render_start_view() -> None:
             return
 
         duration = max(1, int(st.session_state.get("countdown_duration", 3)))
-
-        if (
-            measurement_config.get("mode") == "webcam"
-            and not st.session_state.get("camera_warmed", False)
-        ):
-            warm_up_camera(measurement_config.get("camera_index", 0))
-            st.session_state["camera_warmed"] = True
-            updated_config = dict(measurement_config)
-            updated_config["skip_warmup"] = True
-            st.session_state["measurement_config"] = updated_config
-            measurement_config = updated_config
 
         placeholder = st.empty()
         subtitle = st.empty()
@@ -523,9 +573,12 @@ def render_measuring_view() -> None:
     st.caption("分析が完了すると自動的に結果画面へ移動します。")
 
     config_for_run = dict(config)
+    if config["mode"] == "webcam":
+        config_for_run["warmup_camera"] = st.session_state.get("warmup_camera")
     if config["mode"] == "webcam" and live_placeholder is not None:
         def frame_callback(frame_idx: int, frame_rgb: np.ndarray) -> None:
-            cropped = crop_to_aspect_ratio(frame_rgb)
+            flipped = np.ascontiguousarray(frame_rgb[:, ::-1, :])
+            cropped = crop_to_aspect_ratio(flipped)
             if cropped is None:
                 return
             resized = cv2.resize(
@@ -545,9 +598,14 @@ def render_measuring_view() -> None:
         config_for_run["frame_callback"] = frame_callback
 
     if st.session_state.get("measurement_ready"):
-        with st.spinner("分析中…"):
-            measurement_result = run_measurement(config_for_run)
-        st.session_state["measurement_ready"] = False
+        measurement_result: Dict = {}
+        try:
+            with st.spinner("分析中…"):
+                measurement_result = run_measurement(config_for_run)
+        finally:
+            st.session_state["measurement_ready"] = False
+            if config["mode"] == "webcam":
+                release_warmup_camera()
         st.session_state["result_df"] = measurement_result["result_df"]
         st.session_state["frame_metrics_df"] = measurement_result["frame_metrics_df"]
         st.session_state["frame_scores_df"] = measurement_result["frame_scores_df"]

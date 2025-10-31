@@ -131,6 +131,7 @@ def video_to_pose_csv(
 
 def capture_pose_from_camera(
     camera_index: int = 0,
+    warmup_camera: Optional[cv2.VideoCapture] = None,
     resize_scale: float = 1.0,
     frame_stride: int = 1,
     capture_seconds: Optional[int] = 10,
@@ -142,10 +143,25 @@ def capture_pose_from_camera(
 ) -> pd.DataFrame:
     """
     Webカメラから一定時間ポーズ推論を行い、ランドマークをDataFrameで返す。
+    warmup_cameraが指定された場合は、そのVideoCaptureを再利用する。
     """
-    cap = cv2.VideoCapture(camera_index)
-    if not cap.isOpened():
+    reuse_capture = warmup_camera is not None
+    cap = warmup_camera if reuse_capture else cv2.VideoCapture(camera_index)
+
+    if cap is None or not cap.isOpened():
+        if reuse_capture and cap is not None:
+            cap.release()
+        cap = cv2.VideoCapture(camera_index)
+        reuse_capture = False
+
+    if not cap or not cap.isOpened():
         raise RuntimeError(f"カメラを開けませんでした: index={camera_index}")
+
+    if not reuse_capture:
+        for _ in range(10):
+            ok, _ = cap.read()
+            if not ok:
+                break
 
     if max_frames is None and capture_seconds is not None:
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -180,7 +196,8 @@ def capture_pose_from_camera(
                         )
                     )
     finally:
-        cap.release()
+        if cap is not None:
+            cap.release()
 
     df = pd.DataFrame(rows, columns=LANDMARK_HEADER)
     if out_csv_path:

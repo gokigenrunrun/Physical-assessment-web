@@ -1,8 +1,9 @@
 import json
 import numpy as np
 import pandas as pd
+from math import acos, degrees
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 
 SCORE_COLUMNS: List[str] = [
@@ -12,6 +13,7 @@ SCORE_COLUMNS: List[str] = [
     "leg_lift",
     "foot_sway",
     "arm_sag",
+    "banzai_score",
 ]
 
 DEFAULT_SCORE_RANGES_RIGHT: Dict[str, Tuple[float, float]] = {
@@ -21,6 +23,7 @@ DEFAULT_SCORE_RANGES_RIGHT: Dict[str, Tuple[float, float]] = {
     "leg_lift": (0.066994, 0.493938),
     "foot_sway": (-0.025375, 0.113312),
     "arm_sag": (-0.022492, 0.132132),
+    "banzai_score": (0.0, 100.0),
 }
 
 DEFAULT_SCORE_RANGES_LEFT: Dict[str, Tuple[float, float]] = {
@@ -30,6 +33,7 @@ DEFAULT_SCORE_RANGES_LEFT: Dict[str, Tuple[float, float]] = {
     "leg_lift": (0.359228, 0.615523),
     "foot_sway": (-0.073904, 0.214358),
     "arm_sag": (-0.031104, 0.168304),
+    "banzai_score": (0.0, 100.0),
 }
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -147,6 +151,7 @@ REFERENCE_ACTION_PHASES = [
 ]
 
 REFERENCE_MAX_FRAME = 350
+BANZAI_REQUIRED_LANDMARKS = [11, 12, 15, 16, 23, 24]
 
 
 def _empty_metric_dict() -> Dict[str, float]:
@@ -302,6 +307,264 @@ def load_pose_dataframe(source: Union[str, Path, pd.DataFrame]) -> pd.DataFrame:
         path = Path(source)
         raw_df = pd.read_csv(path, skip_blank_lines=True)
     return preprocess_landmarks(raw_df)
+
+
+def vertical_angle(px: float, py: float) -> float:
+    """
+    Return the angle in degrees between (px, py) and the vertical upward direction (0, -1).
+    Smaller values indicate a more vertical (arms-up) alignment.
+    """
+    norm = np.hypot(px, py)
+    if norm == 0 or not np.isfinite(norm):
+        return np.nan
+    cos_theta = np.clip(-py / norm, -1.0, 1.0)
+    return float(degrees(acos(cos_theta)))
+
+
+def contiguous_windows(mask: np.ndarray) -> List[Tuple[int, int]]:
+    """
+    Return inclusive index intervals for contiguous True regions in the mask.
+    """
+    if mask.size == 0:
+        return []
+    true_idx = np.where(mask)[0]
+    if true_idx.size == 0:
+        return []
+    windows: List[Tuple[int, int]] = []
+    start = prev = int(true_idx[0])
+    for idx in true_idx[1:]:
+        idx = int(idx)
+        if idx == prev + 1:
+            prev = idx
+            continue
+        windows.append((start, prev))
+        start = prev = idx
+    windows.append((start, prev))
+    return windows
+
+
+def up_score(left_up: np.ndarray, right_up: np.ndarray) -> np.ndarray:
+    """
+    Compute the bilateral arms-up score as the minimum elevation of both arms.
+    """
+    return np.minimum(left_up, right_up)
+
+
+def evaluate_banzai_pose_auto(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Detect arms-up posture segments (Banzai) across all frames,
+    compute Peak (p90), Consistency (mean), and blended score.
+    Phase-independent: does not rely on pre-defined timing windows.
+    """
+    fps_raw = df.attrs.get("fps", 30)
+    try:
+        fps = int(fps_raw)
+    except (TypeError, ValueError):
+        fps = 30
+    if fps <= 0:
+        fps = 30
+
+    VIS_THRESH = 0.3
+    HEIGHT_THRESH = 0.08
+    VERTICAL_DEG_MAX = 55
+    MIN_WINDOW_FRAMES = max(1, int(0.18 * fps))
+
+    base_result: Dict[str, Any] = {
+        "file": str(df.attrs.get("source", "")),
+        "has_window": False,
+        "rep_frame_num": np.nan,
+        "window_start_frame": np.nan,
+        "window_end_frame": np.nan,
+        "window_len_frames": 0,
+        "window_len_sec": 0.0,
+        "p90_upscore": np.nan,
+        "mean_upscore": np.nan,
+        "final_score": np.nan,
+        "selected_window_index": None,
+        "windows": [],
+    }
+
+    if df.empty or "frame" not in df or "landmark_index" not in df:
+        base_result["note"] = "Insufficient data for evaluation"
+        return base_result
+
+    work_df = df.copy()
+    if work_df["frame"].dtype == object:
+        frame_num = work_df["frame"].astype(str).str.extract(r"(\\d+)")[0]
+        work_df["_frame_num"] = pd.to_numeric(frame_num, errors="coerce")
+    else:
+        work_df["_frame_num"] = pd.to_numeric(work_df["frame"], errors="coerce")
+
+    work_df = work_df.dropna(subset=["_frame_num"])
+    if work_df.empty:
+        base_result["note"] = "No valid frame indices"
+        return base_result
+
+    subset = work_df[work_df["landmark_index"].isin(BANZAI_REQUIRED_LANDMARKS)].copy()
+    if subset.empty:
+        base_result["note"] = "Required landmarks missing"
+        return base_result
+
+    if "visibility" in subset.columns:
+        low_vis = subset["visibility"] < VIS_THRESH
+        subset.loc[low_vis, ["x", "y"]] = np.nan
+
+    try:
+        pivot = subset.pivot_table(
+            index="_frame_num",
+            columns="landmark_index",
+            values=["x", "y"],
+            aggfunc="first",
+        ).sort_index()
+    except Exception:
+        base_result["note"] = "Failed to pivot landmark data"
+        return base_result
+
+    if pivot.empty:
+        base_result["note"] = "No pivoted data for evaluation"
+        return base_result
+
+    frame_numbers = pivot.index.to_numpy(dtype=int, copy=False)
+
+    def get_xy(lm: int) -> Tuple[np.ndarray, np.ndarray]:
+        x_vals = pivot.get(("x", lm))
+        y_vals = pivot.get(("y", lm))
+        if x_vals is None or y_vals is None:
+            return np.full(len(pivot), np.nan), np.full(len(pivot), np.nan)
+        return x_vals.to_numpy(dtype=float, copy=False), y_vals.to_numpy(dtype=float, copy=False)
+
+    l_sh_x, l_sh_y = get_xy(11)
+    r_sh_x, r_sh_y = get_xy(12)
+    l_wr_x, l_wr_y = get_xy(15)
+    r_wr_x, r_wr_y = get_xy(16)
+    l_hip_x, l_hip_y = get_xy(23)
+    r_hip_x, r_hip_y = get_xy(24)
+
+    sh_x = np.nanmean(np.vstack([l_sh_x, r_sh_x]), axis=0)
+    sh_y = np.nanmean(np.vstack([l_sh_y, r_sh_y]), axis=0)
+    hip_x = np.nanmean(np.vstack([l_hip_x, r_hip_x]), axis=0)
+    hip_y = np.nanmean(np.vstack([l_hip_y, r_hip_y]), axis=0)
+
+    torso_len = np.hypot(sh_x - hip_x, sh_y - hip_y)
+    invalid_torso = (~np.isfinite(torso_len)) | (torso_len <= 0)
+    torso_len[invalid_torso] = np.nan
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        left_up = (sh_y - l_wr_y) / torso_len
+        right_up = (sh_y - r_wr_y) / torso_len
+
+    def _arm_angle(wr_x: np.ndarray, wr_y: np.ndarray, sh_x_vals: np.ndarray, sh_y_vals: np.ndarray) -> np.ndarray:
+        angles = np.full(len(wr_x), np.nan)
+        finite_mask = np.isfinite(wr_x) & np.isfinite(wr_y) & np.isfinite(sh_x_vals) & np.isfinite(sh_y_vals)
+        idx = np.where(finite_mask)[0]
+        for i in idx:
+            delta_x = wr_x[i] - sh_x_vals[i]
+            delta_y = wr_y[i] - sh_y_vals[i]
+            angles[i] = vertical_angle(delta_x, delta_y)
+        return angles
+
+    l_ang = _arm_angle(l_wr_x, l_wr_y, l_sh_x, l_sh_y)
+    r_ang = _arm_angle(r_wr_x, r_wr_y, r_sh_x, r_sh_y)
+
+    cond_left = (left_up >= HEIGHT_THRESH) & (l_ang <= VERTICAL_DEG_MAX)
+    cond_right = (right_up >= HEIGHT_THRESH) & (r_ang <= VERTICAL_DEG_MAX)
+    bilateral_mask = cond_left & cond_right & np.isfinite(up_score(left_up, right_up))
+
+    windows = [
+        (start, end)
+        for start, end in contiguous_windows(bilateral_mask)
+        if (end - start + 1) >= MIN_WINDOW_FRAMES
+    ]
+
+    if not windows:
+        base_result["note"] = "No valid 'arms up' window found"
+        return base_result
+
+    ups = up_score(left_up, right_up)
+    window_summaries: List[Dict[str, Any]] = []
+    for start, end in windows:
+        seg = ups[start : end + 1]
+        finite_mask = np.isfinite(seg)
+        if not finite_mask.any():
+            continue
+        p90 = float(np.nanpercentile(seg, 90))
+        mean = float(np.nanmean(seg))
+        target_val = p90 if np.isfinite(p90) else mean
+        if not np.isfinite(target_val):
+            target_val = float(seg[finite_mask][0])
+        abs_diff = np.abs(seg - target_val)
+        try:
+            idx_rel = int(np.nanargmin(abs_diff))
+        except ValueError:
+            idx_rel = int(np.where(finite_mask)[0][0])
+
+        rep_idx = start + idx_rel
+        rep_frame = int(frame_numbers[rep_idx])
+        length_frames = int(end - start + 1)
+        length_sec = length_frames / fps if fps > 0 else np.nan
+        final_raw = np.nan
+        if np.isfinite(p90) and np.isfinite(mean):
+            final_raw = 0.6 * p90 + 0.4 * mean
+        elif np.isfinite(p90):
+            final_raw = float(p90)
+        elif np.isfinite(mean):
+            final_raw = float(mean)
+
+        window_summaries.append(
+            {
+                "window_id": len(window_summaries),
+                "start_idx": int(start),
+                "end_idx": int(end),
+                "window_start_frame": int(frame_numbers[int(start)]),
+                "window_end_frame": int(frame_numbers[int(end)]),
+                "window_len_frames": length_frames,
+                "window_len_sec": float(length_sec),
+                "p90_upscore": round(float(p90), 5),
+                "mean_upscore": round(float(mean), 5),
+                "final_score": round(float(final_raw), 5) if np.isfinite(final_raw) else np.nan,
+                "rep_frame_num": rep_frame,
+            }
+        )
+
+    if not window_summaries:
+        base_result["note"] = "No valid 'arms up' window found"
+        return base_result
+    base_result["windows"] = window_summaries
+
+    def _sort_key(item: Dict[str, Any]) -> Tuple[float, float, int]:
+        final_val_raw = item.get("final_score")
+        final_val = float(final_val_raw) if final_val_raw is not None else float("-inf")
+        if not np.isfinite(final_val):
+            final_val = float("-inf")
+
+        p90_val_raw = item.get("p90_upscore")
+        p90_val = float(p90_val_raw) if p90_val_raw is not None else float("-inf")
+        if not np.isfinite(p90_val):
+            p90_val = float("-inf")
+
+        mean_val_raw = item.get("mean_upscore")
+        mean_val = float(mean_val_raw) if mean_val_raw is not None else float("-inf")
+        if not np.isfinite(mean_val):
+            mean_val = float("-inf")
+
+        length_frames = int(item.get("window_len_frames") or 0)
+        return (final_val, p90_val, mean_val, length_frames)
+
+    best = max(window_summaries, key=_sort_key)
+
+    return {
+        **base_result,
+        "has_window": True,
+        "rep_frame_num": int(best["rep_frame_num"]),
+        "window_start_frame": int(best["window_start_frame"]),
+        "window_end_frame": int(best["window_end_frame"]),
+        "window_len_frames": int(best["window_len_frames"]),
+        "window_len_sec": round(float(best["window_len_sec"]), 3),
+        "p90_upscore": float(best["p90_upscore"]),
+        "mean_upscore": float(best["mean_upscore"]),
+        "final_score": float(best["final_score"]),
+        "selected_window_index": int(best["window_id"]),
+    }
 
 
 def _get_landmark_series(
@@ -467,6 +730,37 @@ def calculate_metrics_by_frame(data: Union[str, Path, pd.DataFrame]) -> pd.DataF
     left_elbow = _get_landmark_series(df, 13, ["y"])
     right_elbow = _get_landmark_series(df, 14, ["y"])
 
+    banzai_eval = evaluate_banzai_pose_auto(df)
+    window_score_map: Dict[int, float] = {}
+    window_candidates: List[Tuple[int, int, float]] = []
+    raw_windows = banzai_eval.get("windows") if isinstance(banzai_eval, dict) else []
+    if isinstance(raw_windows, list):
+        for win in raw_windows:
+            if not isinstance(win, dict):
+                continue
+            start_raw = win.get("window_start_frame")
+            end_raw = win.get("window_end_frame")
+            final_raw = win.get("final_score")
+            try:
+                start_frame = int(start_raw)
+                end_frame = int(end_raw)
+            except (TypeError, ValueError):
+                continue
+            if start_frame > end_frame:
+                start_frame, end_frame = end_frame, start_frame
+            final_score = float(final_raw) if final_raw is not None else np.nan
+            if not np.isfinite(final_score):
+                continue
+            window_candidates.append((start_frame, end_frame, final_score))
+
+    for frame in frames:
+        score_val = np.nan
+        for start_frame, end_frame, final_score in window_candidates:
+            if start_frame <= frame <= end_frame:
+                if np.isnan(score_val) or final_score > score_val:
+                    score_val = final_score
+        window_score_map[frame] = score_val
+
     records: List[Dict[str, float]] = []
     for frame in frames:
         action = classify_action(frame)
@@ -517,6 +811,8 @@ def calculate_metrics_by_frame(data: Union[str, Path, pd.DataFrame]) -> pd.DataF
                 float(abs(right_shoulder.loc[frame, "y"] - right_elbow.loc[frame, "y"]))
             )
         metrics["arm_sag"] = float(np.nanmean(arm_vals)) if arm_vals else np.nan
+        score_val = window_score_map.get(frame, np.nan)
+        metrics["banzai_score"] = float(score_val) if np.isfinite(score_val) else np.nan
 
         records.append(metrics)
 
@@ -600,6 +896,8 @@ def compare_motion_profiles(
     similarities["overall_similarity"] = float(np.mean(valid_scores)) if valid_scores else np.nan
 
     return similarities
+
+
 def _determine_vertical_direction(df: pd.DataFrame) -> str:
     """
     Detect whether larger y-values are lower (\"top-down\") or higher (\"bottom-up\").
@@ -617,3 +915,65 @@ def _determine_vertical_direction(df: pd.DataFrame) -> str:
     if diff.mean() < 0:
         return "bottom_up"
     return "top_down"
+
+
+# ============================================================
+# BANZAI EVALUATION MODULE
+# ------------------------------------------------------------
+# Evaluate "arms-up" (Banzai) motion segments from pose CSVs.
+# This function detects valid arms-up windows and computes
+# Peak (p90) and Consistency (mean) scores, combining them
+# into a final score (0.6 * Peak + 0.4 * Consistency).
+# ============================================================
+
+
+def evaluate_banzai_from_csv(csv_path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Load a Mediapipe pose CSV, evaluate the Banzai pose quality, and return summary metrics.
+    """
+    path = Path(csv_path)
+    base: Dict[str, Any] = {
+        "file": str(path),
+        "has_window": False,
+        "rep_frame_num": np.nan,
+        "window_start_frame": np.nan,
+        "window_end_frame": np.nan,
+        "window_len_frames": 0,
+        "window_len_sec": 0.0,
+        "p90_upscore": np.nan,
+        "mean_upscore": np.nan,
+        "final_score": np.nan,
+        "selected_window_index": None,
+        "windows": [],
+    }
+
+    if not path.is_file():
+        base["note"] = "File not found"
+        return base
+
+    try:
+        pose_df = load_pose_dataframe(path)
+        pose_df.attrs["source"] = str(path)
+    except Exception as exc:
+        base["note"] = f"Failed to load CSV: {exc}"
+        return base
+
+    evaluation = evaluate_banzai_pose_auto(pose_df)
+    merged = {**base, **evaluation}
+
+    return merged
+
+
+def batch_evaluate_banzai(input_dir: Union[str, Path]) -> pd.DataFrame:
+    """
+    Evaluate all CSV files in a directory for the Banzai pose and return a DataFrame summary.
+    """
+    dir_path = Path(input_dir)
+    if not dir_path.exists() or not dir_path.is_dir():
+        raise ValueError(f"input_dir must be an existing directory: {input_dir}")
+
+    records: List[Dict[str, Any]] = []
+    for csv_file in sorted(dir_path.glob("*.csv")):
+        records.append(evaluate_banzai_from_csv(csv_file))
+
+    return pd.DataFrame(records)

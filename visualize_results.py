@@ -140,14 +140,7 @@ def plot_frame_metrics(df: pd.DataFrame, title="Frame-wise Motion Dynamics"):
     plt.tight_layout()
     plt.show()
 
-    # =============================
-# 🧪 実行パート（ファイルの一番下に追加！）
-# =============================
-
-if __name__ == "__main__":
-    df = calculate_metrics_by_frame("tmp_single_frame.csv")  # CSVからフレームごとにスコア計算
-    print(df.head())  # 結果をターミナルで確認
-    plot_frame_metrics(df, title="Frame-wise Motion Dynamics (Sample)")  # グラフを表示
+    
     
 # import matplotlib.pyplot as plt
 # import seaborn as sns

@@ -15,9 +15,11 @@ from calculate_metrics import (
     calculate_metrics_by_frame,
     calculate_metrics_from_df,
     classify_action,
+    evaluate_banzai_pose_auto,
     get_score_range,
     preprocess_landmarks,
 )
+from calculate_metrics import batch_evaluate_banzai
 from pose_extract import capture_pose_from_camera, video_to_pose_csv
 
 st.set_page_config(page_title="運動スコア自動採点アプリ", layout="centered")
@@ -30,6 +32,7 @@ METRIC_LABELS = {
     "leg_lift": "足上げ高さ",
     "foot_sway": "接地足の横ブレ",
     "arm_sag": "腕の垂れ下がり",
+    "banzai_score": "バンザイ姿勢",
     "average_score": "平均スコア",
 }
 
@@ -234,7 +237,22 @@ def score_data(
     pose_df: pd.DataFrame,
     label: str,
     frame_metrics: Optional[pd.DataFrame] = None,
+    action: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+    if action == "banzai":
+        banzai_result = evaluate_banzai_pose_auto(pose_df)
+        banzai_result["file"] = label
+        base_metrics = {metric: np.nan for metric in SCORE_COLUMNS}
+        base_scores = {f"{metric}_score": np.nan for metric in SCORE_COLUMNS}
+        result = {
+            "file_name": label,
+            **base_metrics,
+            **base_scores,
+            "total_score": np.nan,
+            **banzai_result,
+        }
+        return pd.DataFrame([result]), None
+
     metrics = calculate_metrics_from_df(pose_df)
     if frame_metrics is None:
         frame_metrics = calculate_metrics_by_frame(pose_df)
@@ -358,7 +376,12 @@ def run_measurement(config: Dict) -> Dict:
         raise ValueError(f"Unsupported mode: {mode}")
 
     frame_metrics_df = calculate_metrics_by_frame(pose_df)
-    result_df, frame_scores_df = score_data(pose_df, label, frame_metrics_df)
+    result_df, frame_scores_df = score_data(
+        pose_df,
+        label,
+        frame_metrics_df,
+        config.get("action"),
+    )
 
     pose_csv_bytes = pose_df.to_csv(index=False).encode("utf-8")
     frame_scores_csv = None
@@ -631,6 +654,34 @@ def render_waiting_view() -> None:
         st.rerun()
 
 
+# ============================================================
+# BANZAI EVALUATION TEST VIEW
+# ------------------------------------------------------------
+# Allows the user to run batch_evaluate_banzai() from Streamlit
+# to confirm that Banzai scoring logic is working properly.
+# ============================================================
+def render_banzai_test_view():
+    import streamlit as st
+    from pathlib import Path
+
+    st.header("🕺 Banzai Evaluation Test")
+    st.write("Run Banzai scoring for all CSVs in a selected folder.")
+
+    folder = st.text_input("Enter folder path", "data_banzai_landmarks")
+    if st.button("Run Banzai Evaluation"):
+        folder_path = Path(folder)
+        if not folder_path.exists():
+            st.error(f"❌ Folder not found: {folder}")
+        else:
+            with st.spinner("Evaluating all CSVs..."):
+                df = batch_evaluate_banzai(folder_path)
+                if df.empty:
+                    st.warning("No valid CSV files found.")
+                else:
+                    st.success("✅ Evaluation complete!")
+                    st.dataframe(df)
+
+
 def render_result_view() -> None:
     result_df = st.session_state.get("result_df")
     frame_scores_df = st.session_state.get("frame_scores_df")
@@ -683,6 +734,23 @@ def render_result_view() -> None:
             if score_cols:
                 group_cols = score_cols + (["average_score"] if include_avg else [])
                 action_means = frame_scores_df.groupby("action")[group_cols].mean().round(1)
+                if "banzai_score" in frame_scores_df.columns:
+                    banzai_score_col = "banzai_score_score" if "banzai_score_score" in frame_scores_df.columns else None
+                    raw_mean = frame_scores_df["banzai_score"].mean(skipna=True)
+                    score_mean = (
+                        frame_scores_df[banzai_score_col].mean(skipna=True)
+                        if banzai_score_col
+                        else raw_mean
+                    )
+                    if np.isfinite(score_mean):
+                        if "両腕上げ" not in action_means.index:
+                            action_means.loc["両腕上げ"] = np.nan
+                        if banzai_score_col:
+                            action_means.loc["両腕上げ", banzai_score_col] = round(float(score_mean), 1)
+                    if np.isfinite(raw_mean) and "banzai_score" in action_means.columns:
+                        if "両腕上げ" not in action_means.index:
+                            action_means.loc["両腕上げ"] = np.nan
+                        action_means.loc["両腕上げ", "banzai_score"] = round(float(raw_mean), 1)
                 if not action_means.empty:
                     display_df = action_means.rename(index=lambda k: ACTION_LABELS.get(k, k))
                     column_map = {}
@@ -757,6 +825,14 @@ def render_result_view() -> None:
 
 
 def main() -> None:
+    selected_page = st.sidebar.selectbox(
+        "ページを選択してください",
+        ["動作スコア表示", "姿勢分析", "カメラ計測", "Banzai Test"],
+    )
+    if selected_page == "Banzai Test":
+        render_banzai_test_view()
+        return
+
     init_session_state()
     page = st.session_state["page"]
 

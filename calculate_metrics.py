@@ -147,10 +147,10 @@ COLUMN_ALIASES = {
 NUMERIC_COLUMNS = ["x", "y", "z", "visibility"]
 
 REFERENCE_ACTION_PHASES = [
-    (18, 34, "right_leg_1"),
-    (56, 72, "left_leg_1"),
-    (94, 110, "right_leg_2"),
-    (132, 148, "left_leg_2"),
+    (15, 29, "right_leg_1"),
+    (51, 65, "left_leg_1"),
+    (86, 100, "right_leg_2"),
+    (120, 134, "left_leg_2"),
 ]
 
 RIGHT_LEG_PHASES = {"right_leg_1", "right_leg_2"}

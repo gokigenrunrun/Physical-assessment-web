@@ -52,25 +52,110 @@ LEG_GROUP_LABELS = {
     "left_leg": "左足平均",
 }
 LEG_PHASE_SHADING = [
-    ("right_leg_1", 18, 34, "skyblue"),
-    ("left_leg_1", 56, 72, "lightpink"),
-    ("right_leg_2", 94, 110, "skyblue"),
-    ("left_leg_2", 132, 148, "lightpink"),
+    ("right_leg_1", 15, 29, "skyblue"),
+    ("left_leg_1", 51, 65, "lightpink"),
+    ("right_leg_2", 86, 100, "skyblue"),
+    ("left_leg_2", 120, 134, "lightpink"),
 ]
+ATTEMPT_COLOR_PINK = "#FF69B4"
+ATTEMPT_COLOR_BLUE = "#007BFF"
+ATTEMPT_FILL_PINK = "rgba(255,105,180,0.4)"
+ATTEMPT_FILL_BLUE = "rgba(0,123,255,0.6)"
+AVERAGE_SCORE_COLOR = "#FF8C00"
 LEG_RADAR_STYLES = {
     "right_leg": [
-        ("right_leg_1", "1回目", "royalblue"),
-        ("right_leg_2", "2回目", "deepskyblue"),
+        ("right_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
+        ("right_leg_2", "2回目", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
     ],
     "left_leg": [
-        ("left_leg_1", "1回目", "lightcoral"),
-        ("left_leg_2", "2回目", "hotpink"),
+        ("left_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
+        ("left_leg_2", "2回目", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
     ],
 }
 LEG_RADAR_TITLES = {
     "right_leg": "右足上げ（1回目・2回目）",
     "left_leg": "左足上げ（1回目・2回目）",
 }
+SCORE_TIER_RULES = [
+    (85, "#2ECC71", "Excellent", "動きが非常に安定しています"),
+    (70, "#2979FF", "Good", "バランス良く動けています"),
+    (55, "#FFB300", "Fair", "動作の安定性をさらに高めましょう"),
+    (0, "#FF4081", "Needs Improvement", "改善の余地があります"),
+]
+DEFAULT_SCORE_COLOR = "#FF4081"
+DEFAULT_SCORE_LABEL = "No Score"
+DEFAULT_SCORE_MESSAGE = "計測データが不足しています"
+METRIC_FEEDBACK_TEMPLATES = {
+    "head_movement": {
+        "high": "頭部が安定しており視線がぶれません。",
+        "mid": "頭部のブレは小さいですが維持を意識しましょう。",
+        "low": "頭部の揺れを抑える意識を高めてください。",
+    },
+    "shoulder_tilt": {
+        "high": "肩のラインが水平に保たれています。",
+        "mid": "肩の傾きは許容範囲ですがさらに安定させましょう。",
+        "low": "左右の肩の高さを揃える意識を持ちましょう。",
+    },
+    "torso_tilt": {
+        "high": "体幹がまっすぐ維持できています。",
+        "mid": "体幹は概ね安定。呼吸を合わせてブレを抑えましょう。",
+        "low": "上体が揺れているので姿勢のキープを意識してください。",
+    },
+    "leg_lift": {
+        "high": "足上げ高さは十分です。",
+        "mid": "もう少し高く上げるとさらに評価が上がります。",
+        "low": "足を大きく引き上げる動きを意識しましょう。",
+    },
+    "foot_sway": {
+        "high": "接地足が安定し軸がぶれていません。",
+        "mid": "接地足は概ね安定。体重の乗せ方を一定にしましょう。",
+        "low": "接地足が揺れているため軸を意識して立ちましょう。",
+    },
+    "arm_sag": {
+        "high": "腕の高さをしっかり保てています。",
+        "mid": "腕は保てていますが肩からの引き上げを意識しましょう。",
+        "low": "腕が下がりやすいので肘を高く維持しましょう。",
+    },
+    "banzai_score": {
+        "high": "バンザイ姿勢が美しくキープできています。",
+        "mid": "バンザイ姿勢は概ね良好。フィニッシュを丁寧に。",
+        "low": "肩と腕を大きく伸ばし、姿勢を保ちましょう。",
+    },
+}
+DEFAULT_FEEDBACK_TEMPLATE = {
+    "high": "動きが安定しています。",
+    "mid": "引き続き安定性を意識しましょう。",
+    "low": "改善ポイントを意識して動作を整えましょう。",
+}
+
+
+def describe_total_score(score: float) -> Tuple[str, str, str]:
+    if not np.isfinite(score):
+        return DEFAULT_SCORE_COLOR, DEFAULT_SCORE_LABEL, DEFAULT_SCORE_MESSAGE
+    for threshold, color, label, message in SCORE_TIER_RULES:
+        if score >= threshold:
+            return color, label, message
+    return DEFAULT_SCORE_COLOR, DEFAULT_SCORE_LABEL, DEFAULT_SCORE_MESSAGE
+
+
+def score_to_color(score: float) -> str:
+    if not np.isfinite(score):
+        return "#9E9E9E"
+    for threshold, color, *_ in SCORE_TIER_RULES:
+        if score >= threshold:
+            return color
+    return DEFAULT_SCORE_COLOR
+
+
+def select_metric_feedback(metric_key: str, score: float) -> str:
+    template = METRIC_FEEDBACK_TEMPLATES.get(metric_key, DEFAULT_FEEDBACK_TEMPLATE)
+    if not np.isfinite(score):
+        return "データ不足のため評価できませんでした。"
+    if score >= 75:
+        return template.get("high") or DEFAULT_FEEDBACK_TEMPLATE["high"]
+    if score >= 50:
+        return template.get("mid") or template.get("high") or DEFAULT_FEEDBACK_TEMPLATE["mid"]
+    return template.get("low") or template.get("mid") or DEFAULT_FEEDBACK_TEMPLATE["low"]
 
 DEFAULT_DISPLAY_ASPECT_RATIO = 3 / 4  # width / height
 DEFAULT_DISPLAY_HEIGHT = 720
@@ -331,6 +416,16 @@ def build_frame_score_table(frame_metrics: pd.DataFrame) -> pd.DataFrame:
     return score_df
 
 
+def build_summary_display_df(result_df: pd.DataFrame) -> pd.DataFrame:
+    if result_df is None or result_df.empty:
+        return result_df
+    display_df = result_df.copy()
+    duplicate_pair = {"banzai_score", "banzai_score_score"}
+    if duplicate_pair.issubset(display_df.columns):
+        display_df = display_df.drop(columns=["banzai_score_score"])
+    return display_df
+
+
 def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     if frame_scores.empty or "frame" not in frame_scores.columns:
@@ -338,6 +433,8 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
     x_values = frame_scores["frame"]
     for col in frame_scores.columns:
         if col in {"frame", "action"}:
+            continue
+        if col == "banzai_score":
             continue
         if col.endswith("_score"):
             base = col.replace("_score", "")
@@ -348,9 +445,11 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
                 go.Scatter(
                     x=x_values,
                     y=frame_scores[col],
-                    mode="lines",
-                    name="平均スコア",
-                    line=dict(width=3),
+                    mode="lines+markers",
+                    name="平均スコア（重要指標）",
+                    line=dict(width=4, color=AVERAGE_SCORE_COLOR),
+                    marker=dict(size=6, color=AVERAGE_SCORE_COLOR),
+                    legendrank=1,
                 )
             )
     fig.update_layout(
@@ -369,7 +468,58 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             line_width=0,
             layer="below",
         )
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            line=dict(color="skyblue", width=14),
+            name="背景色: 右足上げフェーズ",
+            legendrank=1000,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="lines",
+            line=dict(color="lightpink", width=14),
+            name="背景色: 左足上げフェーズ",
+            legendrank=1001,
+        )
+    )
     return fig
+
+
+def render_metric_feedback_cards(result_row: pd.Series) -> None:
+    st.markdown("### 🧩 指標別フィードバック")
+    metric_keys = [key for key in SCORE_COLUMNS if f"{key}_score" in result_row.index]
+    if not metric_keys:
+        st.info("指標スコアがまだ計算されていません。")
+        return
+    columns = st.columns(2)
+    for idx, metric_key in enumerate(metric_keys):
+        col = columns[idx % 2]
+        score_val = float(result_row.get(f"{metric_key}_score", np.nan))
+        color = score_to_color(score_val)
+        label = METRIC_LABELS.get(metric_key, metric_key)
+        feedback = select_metric_feedback(metric_key, score_val)
+        score_text = "--" if not np.isfinite(score_val) else f"{score_val:.1f}"
+        card_html = f"""
+        <div style="
+            background-color:#FFFFFF;
+            border:1px solid #F0F0F0;
+            border-radius:16px;
+            padding:20px;
+            margin-bottom:16px;
+            box-shadow:0 8px 20px rgba(0,0,0,0.04);
+        ">
+            <div style="font-size:15px;color:#8A8A8A;margin-bottom:6px;">{label}</div>
+            <div style="font-size:34px;font-weight:700;color:{color};line-height:1;">{score_text}</div>
+            <div style="font-size:14px;color:#4F4F4F;margin-top:6px;">{feedback}</div>
+        </div>
+        """
+        col.markdown(card_html, unsafe_allow_html=True)
 
 
 def extract_pose_from_video(video_path: str, resize_scale: float, frame_stride: int) -> pd.DataFrame:
@@ -719,27 +869,49 @@ def render_result_view() -> None:
         st.rerun()
         return
 
-    st.header("📊 採点結果")
-    st.dataframe(result_df, use_container_width=True)
+    summary_table = build_summary_display_df(result_df)
+    if summary_table is None or summary_table.empty:
+        st.info("スコアデータが見つかりませんでした。もう一度計測してください。")
+        return
 
-    total_score = result_df["total_score"].iloc[0]
-    st.metric("総合スコア（0〜100）", f"{total_score:.1f} 点")
+    st.header("📊 採点結果")
+    summary_row = summary_table.iloc[0]
+    total_score = float(summary_row.get("total_score", np.nan))
+    tier_color, tier_label, tier_message = describe_total_score(total_score)
+    total_score_text = "--" if not np.isfinite(total_score) else f"{total_score:.1f}"
+
+    score_card_html = f"""
+    <div style="text-align:center;padding:32px 0;">
+        <div style="font-size:20px;color:#7B7B7B;">総合スコア（0〜100）</div>
+        <div style="font-size:92px;font-weight:800;color:{tier_color};line-height:1;">
+            {total_score_text}
+        </div>
+        <div style="font-size:30px;font-weight:600;color:{tier_color};margin-top:8px;">
+            {tier_label}
+        </div>
+        <div style="font-size:16px;color:#555555;margin-top:4px;">
+            {tier_message}
+        </div>
+    </div>
+    """
+    st.markdown(score_card_html, unsafe_allow_html=True)
 
     english_keys = SCORE_COLUMNS
     values = [
-        float(np.nan_to_num(result_df.at[0, f"{k}_score"], nan=0.0))
+        float(np.nan_to_num(summary_row.get(f"{k}_score", np.nan), nan=0.0))
         for k in english_keys
     ]
     labels_closed = english_keys + [english_keys[0]]
     radar_values = values + values[:1]
 
+    st.markdown("### 📊 モーションプロファイル")
     fig = go.Figure(
         data=go.Scatterpolar(
             r=radar_values,
             theta=labels_closed,
             fill="toself",
             line_color="#4A90E2",
-            fillcolor="rgba(74,144,226,0.3)",
+            fillcolor="rgba(74,144,226,0.4)",
         )
     )
     fig.update_layout(
@@ -749,10 +921,27 @@ def render_result_view() -> None:
         height=520,
         margin=dict(l=40, r=40, t=40, b=40),
     )
+    if np.isfinite(total_score):
+        fig.add_annotation(
+            dict(
+                text=f"{total_score:.1f}",
+                x=0.5,
+                y=0.5,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(color="#FF4081", size=44, family="Helvetica",),
+            )
+        )
     st.plotly_chart(fig, use_container_width=True)
 
+    render_metric_feedback_cards(summary_row)
+
     if frame_scores_df is not None and not frame_scores_df.empty:
-        st.subheader("🕒 フレームごとのスコア推移")
+        st.markdown("### ⏱ フレームごとの推移")
+        avg_frame_score = float(frame_scores_df["average_score"].mean(skipna=True)) if "average_score" in frame_scores_df else np.nan
+        if np.isfinite(avg_frame_score):
+            st.metric("平均フレームスコア（重要指標）", f"{avg_frame_score:.1f} 点")
         st.plotly_chart(build_frame_chart(frame_scores_df), use_container_width=True)
         with st.expander("フレーム別スコアを表示"):
             st.dataframe(frame_scores_df, use_container_width=True)
@@ -817,7 +1006,7 @@ def render_result_view() -> None:
                                 continue
                             labels_closed = metric_labels + [metric_labels[0]]
                             fig_action = go.Figure()
-                            for phase_key, suffix, color in styles:
+                            for phase_key, suffix, line_color, fill_color in styles:
                                 if phase_key not in action_means.index:
                                     continue
                                 per_action_values = [
@@ -834,9 +1023,9 @@ def render_result_view() -> None:
                                         theta=labels_closed,
                                         fill="toself",
                                         name=f"{ACTION_LABELS.get(phase_key, phase_key)} {suffix}",
-                                        line_color=color,
-                                        fillcolor=color,
-                                        opacity=0.5,
+                                        line_color=line_color,
+                                        fillcolor=fill_color,
+                                        opacity=1.0,
                                     )
                                 )
                             if not fig_action.data:
@@ -850,6 +1039,9 @@ def render_result_view() -> None:
                                 height=360,
                             )
                             st.plotly_chart(fig_action, use_container_width=True)
+
+    with st.expander("スコア詳細テーブルを表示"):
+        st.dataframe(summary_table, use_container_width=True)
 
     st.write("---")
     col1, col2 = st.columns(2)
@@ -875,14 +1067,6 @@ def render_result_view() -> None:
 
 
 def main() -> None:
-    selected_page = st.sidebar.selectbox(
-        "ページを選択してください",
-        ["動作スコア表示", "姿勢分析", "カメラ計測", "Banzai Test"],
-    )
-    if selected_page == "Banzai Test":
-        render_banzai_test_view()
-        return
-
     init_session_state()
     page = st.session_state["page"]
 

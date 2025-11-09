@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-import base64
 import cv2
 import numpy as np
 import pandas as pd
@@ -37,14 +36,46 @@ METRIC_LABELS = {
 }
 
 ACTION_LABELS = {
-    "right_leg": "右足上げ",
-    "left_leg": "左足上げ",
-    "raise": "両腕上げ",
+    "right_leg_1": "右足上げ (1回目)",
+    "right_leg_2": "右足上げ (2回目)",
+    "left_leg_1": "左足上げ (1回目)",
+    "left_leg_2": "左足上げ (2回目)",
+}
+
+LEG_PHASE_ORDER = ["right_leg_1", "left_leg_1", "right_leg_2", "left_leg_2"]
+LEG_PHASE_GROUPS = {
+    "right_leg": ["right_leg_1", "right_leg_2"],
+    "left_leg": ["left_leg_1", "left_leg_2"],
+}
+LEG_GROUP_LABELS = {
+    "right_leg": "右足平均",
+    "left_leg": "左足平均",
+}
+LEG_PHASE_SHADING = [
+    ("right_leg_1", 18, 34, "skyblue"),
+    ("left_leg_1", 56, 72, "lightpink"),
+    ("right_leg_2", 94, 110, "skyblue"),
+    ("left_leg_2", 132, 148, "lightpink"),
+]
+LEG_RADAR_STYLES = {
+    "right_leg": [
+        ("right_leg_1", "1回目", "royalblue"),
+        ("right_leg_2", "2回目", "deepskyblue"),
+    ],
+    "left_leg": [
+        ("left_leg_1", "1回目", "lightcoral"),
+        ("left_leg_2", "2回目", "hotpink"),
+    ],
+}
+LEG_RADAR_TITLES = {
+    "right_leg": "右足上げ（1回目・2回目）",
+    "left_leg": "左足上げ（1回目・2回目）",
 }
 
 DEFAULT_DISPLAY_ASPECT_RATIO = 3 / 4  # width / height
 DEFAULT_DISPLAY_HEIGHT = 720
 DEFAULT_CAPTURE_SECONDS = 12
+COUNTDOWN_SECONDS = 5
 
 
 def _get_reference_dimensions(path: Path) -> Optional[tuple[int, int]]:
@@ -87,6 +118,28 @@ else:
 REFERENCE_DURATION_SECONDS = _get_reference_duration(REFERENCE_VIDEO_PATH) or DEFAULT_CAPTURE_SECONDS
 
 
+def render_reference_video_element(
+    placeholder,
+    *,
+    autoplay: bool = False,
+    loop: bool = False,
+    muted: bool = True,
+) -> None:
+    """
+    Render the reference video with consistent options or show a fallback message.
+    """
+    if not REFERENCE_VIDEO_PATH.exists():
+        placeholder.info("お手本動画が見つかりません。")
+        return
+    placeholder.video(
+        str(REFERENCE_VIDEO_PATH),
+        start_time=0,
+        autoplay=autoplay,
+        loop=loop,
+        muted=muted,
+    )
+
+
 def warm_up_camera(camera_index: int = 0, frames: int = 10, delay: float = 0.3) -> None:
     cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
@@ -98,24 +151,6 @@ def warm_up_camera(camera_index: int = 0, frames: int = 10, delay: float = 0.3) 
             time.sleep(delay)
     finally:
         cap.release()
-
-
-@st.cache_data(show_spinner=False)
-def load_reference_video_payload(path: Path) -> Optional[tuple[str, str]]:
-    if not path.exists():
-        return None
-    try:
-        data = path.read_bytes()
-        b64 = base64.b64encode(data).decode("utf-8")
-        suffix = path.suffix.lower()
-        mime = "video/mp4"
-        if suffix == ".mov":
-            mime = "video/quicktime"
-        elif suffix == ".webm":
-            mime = "video/webm"
-        return b64, mime
-    except Exception:
-        return None
 
 
 def crop_to_aspect_ratio(frame: np.ndarray, target_ratio: float = DISPLAY_ASPECT_RATIO) -> np.ndarray:
@@ -160,8 +195,7 @@ def init_session_state() -> None:
         "wait_until": None,
         "temp_paths": [],
         "countdown_active": False,
-        "countdown_start": None,
-        "countdown_duration": 3,
+        "countdown_duration": COUNTDOWN_SECONDS,
         "camera_warmed": False,
         "warmup_camera": None,
         "warmup_camera_initialized": False,
@@ -212,7 +246,7 @@ def reset_measurement_state() -> None:
         st.session_state[key] = None if key != "measurement_ready" else False
     st.session_state["page"] = "start"
     st.session_state["countdown_active"] = False
-    st.session_state["countdown_start"] = None
+    st.session_state["countdown_duration"] = COUNTDOWN_SECONDS
     st.session_state["camera_warmed"] = False
     st.session_state["measurement_start_timestamp"] = None
 
@@ -326,6 +360,15 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
         yaxis=dict(range=[0, 100]),
         template="plotly_white",
     )
+    for _, start, end, color in LEG_PHASE_SHADING:
+        fig.add_vrect(
+            x0=start,
+            x1=end,
+            fillcolor=color,
+            opacity=0.15,
+            line_width=0,
+            layer="below",
+        )
     return fig
 
 
@@ -427,44 +470,6 @@ def render_start_view() -> None:
     elif st.session_state.get("camera_warmed"):
         st.caption("📸 カメラの準備が整っています。")
 
-    if st.session_state.get("countdown_active", False):
-        measurement_config = st.session_state.get("measurement_config")
-        if measurement_config is None:
-            st.session_state["countdown_active"] = False
-            st.session_state["countdown_start"] = None
-            return
-
-        duration = max(1, int(st.session_state.get("countdown_duration", 3)))
-
-        placeholder = st.empty()
-        subtitle = st.empty()
-        subtitle.markdown("**姿勢を整えてください…**")
-        for value in range(duration, 0, -1):
-            placeholder.markdown(
-                f"""
-                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh;">
-                    <div style=\"font-size:9rem; font-weight:700; color:#1C6DD0; line-height:1;\">{value}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            time.sleep(1)
-        placeholder.markdown(
-            """
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh;">
-                <div style="font-size:7rem; font-weight:700; color:#1C6DD0; line-height:1;">スタート!</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        time.sleep(0.3)
-        st.session_state["countdown_active"] = False
-        st.session_state["countdown_start"] = None
-        st.session_state["measurement_ready"] = True
-        st.session_state["page"] = "measuring"
-        st.rerun()
-        return
-
     st.session_state["source_type"] = st.radio(
         "入力ソースを選択",
         ["動画アップロード", "Webカメラ"],
@@ -542,9 +547,9 @@ def render_start_view() -> None:
         st.session_state["measurement_config"] = config
         st.session_state["measurement_ready"] = False
         st.session_state["countdown_active"] = True
-        st.session_state["countdown_start"] = time.time()
+        st.session_state["countdown_duration"] = COUNTDOWN_SECONDS
         st.session_state["camera_warmed"] = False
-        st.session_state["page"] = "start"
+        st.session_state["page"] = "measuring"
         st.rerun()
 
 
@@ -555,28 +560,44 @@ def render_measuring_view() -> None:
         st.rerun()
         return
 
+    if st.session_state.get("countdown_active"):
+        st.header("🎬 計測開始準備中…")
+        message_placeholder = st.empty()
+        countdown_placeholder = st.empty()
+        message_placeholder.info("🎬 計測開始までお待ちください…")
+        duration = int(st.session_state.get("countdown_duration", COUNTDOWN_SECONDS) or COUNTDOWN_SECONDS)
+        for value in range(duration, 0, -1):
+            countdown_placeholder.markdown(
+                f"""
+                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh;">
+                    <div style="font-size:9rem; font-weight:700; color:#F3722C; line-height:1;">{value}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            time.sleep(1)
+        countdown_placeholder.markdown(
+            """
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh;">
+                <div style="font-size:6rem; font-weight:700; color:#43AA8B; line-height:1;">スタート!</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        time.sleep(0.3)
+        st.session_state["countdown_active"] = False
+        st.session_state["measurement_ready"] = True
+        st.rerun()
+        return
+
     st.header("🏃‍♀️ 計測中…")
     col1, col2 = st.columns([1, 1])
+    reference_video_placeholder = None
     with col1:
         st.subheader("お手本")
-        if REFERENCE_VIDEO_PATH.exists():
-            payload = load_reference_video_payload(REFERENCE_VIDEO_PATH)
-            if payload:
-                b64, mime = payload
-                st.markdown(
-                    f"""
-                    <div style="width:100%; max-width:{DISPLAY_WIDTH}px; margin:auto;">
-                        <video autoplay loop muted playsinline style="width:100%; height:auto; aspect-ratio:{DISPLAY_ASPECT_RATIO}; border-radius:12px; background:#000;">
-                            <source src="data:{mime};base64,{b64}" type="{mime}">
-                        </video>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.video(str(REFERENCE_VIDEO_PATH))
-        else:
-            st.info("お手本動画が見つかりません。")
+        reference_video_placeholder = st.empty()
+        if not st.session_state.get("measurement_ready"):
+            reference_video_placeholder.info("カウントダウン完了後にお手本動画が再生されます。")
     live_placeholder = None
     with col2:
         st.subheader("あなたの動き")
@@ -620,7 +641,15 @@ def render_measuring_view() -> None:
 
         config_for_run["frame_callback"] = frame_callback
 
-    if st.session_state.get("measurement_ready"):
+    measurement_ready = st.session_state.get("measurement_ready")
+    if measurement_ready and reference_video_placeholder is not None:
+        render_reference_video_element(
+            reference_video_placeholder,
+            autoplay=True,
+            loop=False,
+        )
+
+    if measurement_ready:
         measurement_result: Dict = {}
         try:
             with st.spinner("分析中…"):
@@ -734,26 +763,14 @@ def render_result_view() -> None:
             if score_cols:
                 group_cols = score_cols + (["average_score"] if include_avg else [])
                 action_means = frame_scores_df.groupby("action")[group_cols].mean().round(1)
-                if "banzai_score" in frame_scores_df.columns:
-                    banzai_score_col = "banzai_score_score" if "banzai_score_score" in frame_scores_df.columns else None
-                    raw_mean = frame_scores_df["banzai_score"].mean(skipna=True)
-                    score_mean = (
-                        frame_scores_df[banzai_score_col].mean(skipna=True)
-                        if banzai_score_col
-                        else raw_mean
-                    )
-                    if np.isfinite(score_mean):
-                        if "両腕上げ" not in action_means.index:
-                            action_means.loc["両腕上げ"] = np.nan
-                        if banzai_score_col:
-                            action_means.loc["両腕上げ", banzai_score_col] = round(float(score_mean), 1)
-                    if np.isfinite(raw_mean) and "banzai_score" in action_means.columns:
-                        if "両腕上げ" not in action_means.index:
-                            action_means.loc["両腕上げ"] = np.nan
-                        action_means.loc["両腕上げ", "banzai_score"] = round(float(raw_mean), 1)
+                action_means = action_means.loc[action_means.index.isin(ACTION_LABELS.keys())]
                 if not action_means.empty:
+                    ordered = [phase for phase in LEG_PHASE_ORDER if phase in action_means.index]
+                    remainder = [idx for idx in action_means.index if idx not in ordered]
+                    action_means = action_means.reindex(ordered + remainder)
+
+                    column_map: Dict[str, str] = {}
                     display_df = action_means.rename(index=lambda k: ACTION_LABELS.get(k, k))
-                    column_map = {}
                     for col_name in display_df.columns:
                         if col_name.endswith("_score"):
                             metric_key = col_name.replace("_score", "")
@@ -766,38 +783,71 @@ def render_result_view() -> None:
                     st.subheader("🧭 動作フェーズ別平均スコア")
                     st.dataframe(display_df, use_container_width=True)
 
-                    action_order = list(action_means.index)
-                    radar_cols = st.columns(len(action_order)) if action_order else []
-                    for col_slot, action_key in zip(radar_cols, action_order):
+                    combined_rows = {}
+                    for group_key, members in LEG_PHASE_GROUPS.items():
+                        existing_members = [m for m in members if m in action_means.index]
+                        if not existing_members:
+                            continue
+                        combined_rows[group_key] = action_means.loc[existing_members].mean().round(1)
+                    if combined_rows:
+                        combined_df = pd.DataFrame(combined_rows).T
+                        combined_df = combined_df.rename(index=lambda k: LEG_GROUP_LABELS.get(k, k))
+                        if column_map:
+                            combined_df = combined_df.rename(columns=column_map)
+                        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
+                        st.subheader("🦵 左右レッグ平均スコア")
+                        st.dataframe(combined_df, use_container_width=True)
+
+                    radar_groups = [
+                        group_key
+                        for group_key in LEG_PHASE_GROUPS
+                        if any(member in action_means.index for member in LEG_PHASE_GROUPS[group_key])
+                    ]
+                    radar_cols = st.columns(len(radar_groups)) if radar_groups else []
+                    for col_slot, group_key in zip(radar_cols, radar_groups):
                         with col_slot:
-                            per_action_values = [
-                                float(action_means.loc[action_key, f"{metric}_score"])
-                                for metric in SCORE_COLUMNS
-                                if f"{metric}_score" in action_means.columns
-                            ]
-                            if not per_action_values:
-                                continue
-                            per_action_labels = [
+                            styles = LEG_RADAR_STYLES.get(group_key, [])
+                            traces = []
+                            metric_labels = [
                                 METRIC_LABELS.get(metric, metric)
                                 for metric in SCORE_COLUMNS
                                 if f"{metric}_score" in action_means.columns
                             ]
-                            labels_closed = per_action_labels + [per_action_labels[0]]
-                            values_closed = per_action_values + per_action_values[:1]
-                            fig_action = go.Figure(
-                                data=go.Scatterpolar(
-                                    r=values_closed,
-                                    theta=labels_closed,
-                                    fill="toself",
-                                    name=ACTION_LABELS.get(action_key, action_key),
+                            if not metric_labels:
+                                continue
+                            labels_closed = metric_labels + [metric_labels[0]]
+                            fig_action = go.Figure()
+                            for phase_key, suffix, color in styles:
+                                if phase_key not in action_means.index:
+                                    continue
+                                per_action_values = [
+                                    float(action_means.loc[phase_key, f"{metric}_score"])
+                                    for metric in SCORE_COLUMNS
+                                    if f"{metric}_score" in action_means.columns
+                                ]
+                                if not per_action_values:
+                                    continue
+                                values_closed = per_action_values + per_action_values[:1]
+                                fig_action.add_trace(
+                                    go.Scatterpolar(
+                                        r=values_closed,
+                                        theta=labels_closed,
+                                        fill="toself",
+                                        name=f"{ACTION_LABELS.get(phase_key, phase_key)} {suffix}",
+                                        line_color=color,
+                                        fillcolor=color,
+                                        opacity=0.5,
+                                    )
                                 )
-                            )
+                            if not fig_action.data:
+                                continue
                             fig_action.update_layout(
-                                title=dict(text=ACTION_LABELS.get(action_key, action_key), x=0.5, font=dict(size=16)),
+                                title=dict(text=LEG_RADAR_TITLES.get(group_key, group_key), x=0.5, font=dict(size=16)),
                                 polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                                showlegend=False,
-                                margin=dict(l=20, r=20, t=60, b=20),
-                                height=340,
+                                showlegend=True,
+                                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                                margin=dict(l=20, r=20, t=60, b=60),
+                                height=360,
                             )
                             st.plotly_chart(fig_action, use_container_width=True)
 

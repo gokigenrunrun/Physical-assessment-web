@@ -3,11 +3,13 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
+import base64
 import cv2
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from html import escape
 
 from calculate_metrics import (
     SCORE_COLUMNS,
@@ -34,6 +36,17 @@ METRIC_LABELS = {
     "banzai_score": "バンザイ姿勢",
     "average_score": "平均スコア",
 }
+SCORE_COLORS = {
+    "バンザイの姿勢": "#1E3A8A",
+    "バンザイ姿勢": "#1E3A8A",
+    "頭のブレ": "#EC4899",
+    "肩の傾き": "#3B82F6",
+    "体幹の傾き": "#0EA5E9",
+    "腕の垂れ下がり": "#F59E0B",
+    "接地足の横ブレ": "#10B981",
+    "足上げ高さ": "#8B5CF6",
+}
+NEUTRAL_COLOR = "#9CA3AF"
 
 ACTION_LABELS = {
     "right_leg_1": "右足上げ (1回目)",
@@ -61,7 +74,7 @@ ATTEMPT_COLOR_PINK = "#FF69B4"
 ATTEMPT_COLOR_BLUE = "#007BFF"
 ATTEMPT_FILL_PINK = "rgba(255,105,180,0.4)"
 ATTEMPT_FILL_BLUE = "rgba(0,123,255,0.6)"
-AVERAGE_SCORE_COLOR = "#FF8C00"
+AVERAGE_SCORE_COLOR = NEUTRAL_COLOR
 LEG_RADAR_STYLES = {
     "right_leg": [
         ("right_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
@@ -85,6 +98,28 @@ SCORE_TIER_RULES = [
 DEFAULT_SCORE_COLOR = "#FF4081"
 DEFAULT_SCORE_LABEL = "No Score"
 DEFAULT_SCORE_MESSAGE = "計測データが不足しています"
+
+
+def hex_to_rgba(hex_color: str, alpha: float) -> str:
+    color = hex_color.lstrip("#")
+    if len(color) == 3:
+        color = "".join(ch * 2 for ch in color)
+    r = int(color[0:2], 16)
+    g = int(color[2:4], 16)
+    b = int(color[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def get_metric_title(metric_key: str) -> str:
+    return METRIC_LABELS.get(metric_key, metric_key)
+
+
+def get_metric_color_by_title(title: str) -> str:
+    return SCORE_COLORS.get(title, "#3B82F6")
+
+
+def get_metric_color_by_key(metric_key: str) -> str:
+    return get_metric_color_by_title(get_metric_title(metric_key))
 METRIC_FEEDBACK_TEMPLATES = {
     "head_movement": {
         "high": "頭部が安定しており視線がぶれません。",
@@ -127,6 +162,151 @@ DEFAULT_FEEDBACK_TEMPLATE = {
     "mid": "引き続き安定性を意識しましょう。",
     "low": "改善ポイントを意識して動作を整えましょう。",
 }
+DETAIL_CARD_METRICS = [
+    "head_movement",
+    "shoulder_tilt",
+    "torso_tilt",
+    "leg_lift",
+    "foot_sway",
+    "arm_sag",
+    "banzai_score",
+]
+METRIC_TITLE_OVERRIDES = {
+    "banzai_score": "バンザイの姿勢",
+    "head_movement": "頭のブレ",
+    "shoulder_tilt": "肩の傾き",
+    "torso_tilt": "体幹の傾き",
+    "leg_lift": "足上げ高さ",
+    "foot_sway": "接地足の横ブレ",
+    "arm_sag": "腕の垂れ下がり",
+}
+RESEARCH_UI_CSS = """
+<style>
+section[data-testid="stSidebar"] {display:none !important;}
+div[data-testid="collapsedControl"] {display:none !important;}
+#MainMenu {visibility:hidden;}
+footer {visibility:hidden;}
+header {visibility:hidden;}
+body {background-color:#FFFFFF;}
+.block-container {max-width:1000px;padding:2rem 1.5rem;margin:0 auto;}
+.hero-score-section {
+    background:#F8FAFF;
+    border:1px solid #E0E7FF;
+    border-radius:24px;
+    padding:2.5rem 1rem;
+    text-align:center;
+    margin-bottom:2rem;
+}
+.hero-badge {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    padding:0.25rem 0.75rem;
+    border-radius:999px;
+    background:#DBEAFE;
+    color:#1E3A8A;
+    font-weight:600;
+    font-size:0.9rem;
+    margin-bottom:0.75rem;
+}
+.hero-score {font-size:64px;font-weight:700;color:#2563EB;line-height:1;}
+.hero-comment {font-size:18px;color:#374151;margin-top:0.5rem;}
+.section-title {
+    font-size:20px;
+    font-weight:600;
+    color:#1E3A8A;
+    margin:1rem 0 0.5rem;
+}
+.subsection-title {
+    font-size:16px;
+    font-weight:600;
+    color:#1E40AF;
+    margin:1.5rem 0 0.5rem;
+}
+.radar-wrap {display:flex;justify-content:center;margin-bottom:2rem;}
+.metric-grid {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:1.5rem;
+    width:100%;
+}
+.metric-row {
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:1rem;
+    width:100%;
+    max-width:900px;
+}
+.metric-row.single {
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    justify-content:center;
+    width:100%;
+    max-width:900px;
+}
+.metric-row.single .metric-card {
+    grid-column:span 2;
+    width:100%;
+}
+.metric-card {
+    width:100%;
+    background:#F9FAFB;
+    border:1px solid #E5E7EB;
+    border-radius:16px;
+    padding:1rem 1.2rem;
+}
+.metric-card.long {
+    height:auto;
+    padding:2rem;
+}
+.metric-title {
+    font-size:16px;
+    font-weight:600;
+    color:#1E3A8A;
+    border-bottom:1px solid #E5E7EB;
+    padding-bottom:0.3rem;
+    margin-bottom:0.8rem;
+}
+.metric-content {
+    display:flex;
+    align-items:center;
+}
+.metric-left {
+    flex:0 0 120px;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+.metric-chart {
+    width:120px;
+    height:120px;
+    object-fit:contain;
+}
+.metric-right {
+    flex:1;
+    padding-left:1rem;
+}
+.metric-score {
+    font-size:22px;
+    font-weight:700;
+    color:#2563EB;
+    margin-bottom:0.2rem;
+}
+.metric-comment {
+    font-size:14px;
+    color:#6B7280;
+    line-height:1.4;
+}
+.metric-comment.long-comment {
+    white-space:pre-line;
+    line-height:1.6;
+    font-size:14px;
+    color:#4B5563;
+    margin-top:0.5rem;
+}
+</style>
+"""
 
 
 def describe_total_score(score: float) -> Tuple[str, str, str]:
@@ -157,10 +337,140 @@ def select_metric_feedback(metric_key: str, score: float) -> str:
         return template.get("mid") or template.get("high") or DEFAULT_FEEDBACK_TEMPLATE["mid"]
     return template.get("low") or template.get("mid") or DEFAULT_FEEDBACK_TEMPLATE["low"]
 
+
+def render_score_block(score: float, label: str, comment_text: str) -> None:
+    if np.isfinite(score):
+        if score < 50:
+            label_bg, label_border, label_color = "#FEE2E2", "#EF4444", "#991B1B"
+        elif score < 70:
+            label_bg, label_border, label_color = "#FEF3C7", "#F59E0B", "#92400E"
+        elif score < 85:
+            label_bg, label_border, label_color = "#DBEAFE", "#3B82F6", "#1E40AF"
+        else:
+            label_bg, label_border, label_color = "#DCFCE7", "#22C55E", "#14532D"
+        score_text = f"{score:.1f}点"
+    else:
+        label_bg, label_border, label_color = "#E5E7EB", "#9CA3AF", "#374151"
+        score_text = "--"
+        label = label or "No Score"
+        comment_text = comment_text or DEFAULT_SCORE_MESSAGE
+
+    st.markdown(
+        f"""
+        <div style="
+            background-color:#EFF6FF;
+            border-radius:16px;
+            text-align:center;
+            padding:1.8rem 1rem;
+            margin-bottom:2rem;
+        ">
+            <div style="
+                display:inline-block;
+                background-color:{label_bg};
+                border:2px solid {label_border};
+                color:{label_color};
+                font-weight:600;
+                border-radius:999px;
+                padding:6px 18px;
+                font-size:16px;
+            ">
+                {label}
+            </div>
+            <div style="font-size:64px; font-weight:700; color:#2563EB; margin-top:8px; line-height:1;">
+                {score_text}
+            </div>
+            <div style="font-size:18px; color:#1E3A8A; margin-top:6px;">
+                {comment_text}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 DEFAULT_DISPLAY_ASPECT_RATIO = 3 / 4  # width / height
 DEFAULT_DISPLAY_HEIGHT = 720
 DEFAULT_CAPTURE_SECONDS = 12
 COUNTDOWN_SECONDS = 5
+
+
+def make_donut_chart(score: float, color: str = "#3B82F6") -> go.Figure:
+    safe_score = float(np.clip(score if np.isfinite(score) else 0.0, 0.0, 100.0))
+    remainder = max(0.0, 100.0 - safe_score)
+    fig = go.Figure(
+        go.Pie(
+            values=[safe_score, remainder],
+            marker=dict(colors=[color, "#E5E7EB"]),
+            hole=0.75,
+            sort=False,
+            direction="clockwise",
+            textinfo="none",
+        )
+    )
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
+
+
+def render_metric_card_html(title: str, score: float, comment: str) -> str:
+    display_value = float(score) if np.isfinite(score) else np.nan
+    score_for_chart = float(np.clip(display_value, 0.0, 100.0)) if np.isfinite(display_value) else 0.0
+    card_color = "#3B82F6"
+    fig = make_donut_chart(score_for_chart, color=card_color)
+    image_bytes = fig.to_image(format="png", width=240, height=240, scale=2)
+    encoded_image = base64.b64encode(image_bytes).decode("ascii")
+    title_html = escape(title)
+    score_text = "-- 点" if not np.isfinite(display_value) else f"{display_value:.1f} 点"
+    raw_comment = (comment or "").strip()
+    is_banzai = title == "バンザイの姿勢"
+    if is_banzai:
+        detail_lines = [raw_comment] if raw_comment else []
+        detail_lines.extend(
+            [
+                "両腕の角度を揃え、肩を後ろへ引くと安定します。",
+                "頭部と体幹のラインをまっすぐに保ち続けましょう。",
+            ]
+        )
+        comment_text = "\n".join(line for line in detail_lines if line)
+        if not comment_text:
+            comment_text = "バンザイ姿勢の評価データが不足しています。"
+        comment_class = "metric-comment long-comment"
+        card_modifier = " long"
+        comment_html = escape(comment_text)
+    else:
+        comment_class = "metric-comment"
+        card_modifier = ""
+        comment_text = raw_comment or "データ不足のため評価できませんでした。"
+        comment_html = escape(comment_text).replace("\n", "<br />")
+    return (
+        f'<div class="metric-card{card_modifier}">'
+        f'\n    <div class="metric-title">{title_html}</div>'
+        f'\n    <div class="metric-content">'
+        f'\n        <div class="metric-left">'
+        f'\n            <img class="metric-chart" src="data:image/png;base64,{encoded_image}" alt="{title_html} score chart" />'
+        f"\n        </div>"
+        f'\n        <div class="metric-right">'
+        f'\n            <div class="metric-score">{score_text}</div>'
+        f'\n            <div class="{comment_class}">{comment_html}</div>'
+        f"\n        </div>"
+        f"\n    </div>"
+        f"\n</div>"
+    )
+
+
+def render_metric_card(title: str, score: float, comment: str) -> None:
+    card_html = render_metric_card_html(title, score, comment)
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
+def inject_research_ui_styles() -> None:
+    if st.session_state.get("research_styles_injected"):
+        return
+    st.markdown(RESEARCH_UI_CSS, unsafe_allow_html=True)
+    st.session_state["research_styles_injected"] = True
 
 
 def _get_reference_dimensions(path: Path) -> Optional[tuple[int, int]]:
@@ -285,6 +595,7 @@ def init_session_state() -> None:
         "warmup_camera": None,
         "warmup_camera_initialized": False,
         "measurement_start_timestamp": None,
+        "research_styles_injected": False,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -432,24 +743,21 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
         return fig
     x_values = frame_scores["frame"]
     for col in frame_scores.columns:
-        if col in {"frame", "action"}:
+        if col in {"frame", "action", "average_score"}:
             continue
         if col == "banzai_score":
             continue
         if col.endswith("_score"):
             base = col.replace("_score", "")
             label = f"{METRIC_LABELS.get(base, base)} (score)"
-            fig.add_trace(go.Scatter(x=x_values, y=frame_scores[col], mode="lines", name=label))
-        elif col == "average_score":
+            color = get_metric_color_by_key(base)
             fig.add_trace(
                 go.Scatter(
                     x=x_values,
                     y=frame_scores[col],
-                    mode="lines+markers",
-                    name="平均スコア（重要指標）",
-                    line=dict(width=4, color=AVERAGE_SCORE_COLOR),
-                    marker=dict(size=6, color=AVERAGE_SCORE_COLOR),
-                    legendrank=1,
+                    mode="lines",
+                    name=label,
+                    line=dict(color=color, width=2.5),
                 )
             )
     fig.update_layout(
@@ -492,34 +800,52 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
 
 
 def render_metric_feedback_cards(result_row: pd.Series) -> None:
-    st.markdown("### 🧩 指標別フィードバック")
-    metric_keys = [key for key in SCORE_COLUMNS if f"{key}_score" in result_row.index]
-    if not metric_keys:
+    st.markdown('<div class="section-title">🧩 詳細指標</div>', unsafe_allow_html=True)
+    card_order = [
+        ("banzai_score", "バンザイの姿勢"),
+        ("head_movement", "頭のブレ"),
+        ("shoulder_tilt", "肩の傾き"),
+        ("torso_tilt", "体幹の傾き"),
+        ("arm_sag", "腕の垂れ下がり"),
+        ("foot_sway", "接地足の横ブレ"),
+        ("leg_lift", "足上げ高さ"),
+    ]
+    if not any(f"{key}_score" in result_row.index for key, _ in card_order):
         st.info("指標スコアがまだ計算されていません。")
         return
-    columns = st.columns(2)
-    for idx, metric_key in enumerate(metric_keys):
-        col = columns[idx % 2]
+    def card_html(metric_key: str, title: str) -> str:
         score_val = float(result_row.get(f"{metric_key}_score", np.nan))
-        color = score_to_color(score_val)
-        label = METRIC_LABELS.get(metric_key, metric_key)
         feedback = select_metric_feedback(metric_key, score_val)
-        score_text = "--" if not np.isfinite(score_val) else f"{score_val:.1f}"
-        card_html = f"""
-        <div style="
-            background-color:#FFFFFF;
-            border:1px solid #F0F0F0;
-            border-radius:16px;
-            padding:20px;
-            margin-bottom:16px;
-            box-shadow:0 8px 20px rgba(0,0,0,0.04);
-        ">
-            <div style="font-size:15px;color:#8A8A8A;margin-bottom:6px;">{label}</div>
-            <div style="font-size:34px;font-weight:700;color:{color};line-height:1;">{score_text}</div>
-            <div style="font-size:14px;color:#4F4F4F;margin-top:6px;">{feedback}</div>
-        </div>
-        """
-        col.markdown(card_html, unsafe_allow_html=True)
+        return render_metric_card_html(title, score_val, feedback)
+
+    cards_html = """
+<div class="metric-grid">
+    <div class="metric-row single">
+        {banzai}
+    </div>
+    <div class="metric-row">
+        {head}
+        {shoulder}
+    </div>
+    <div class="metric-row">
+        {torso}
+        {arm}
+    </div>
+    <div class="metric-row">
+        {foot}
+        {leg}
+    </div>
+</div>
+""".format(
+        banzai=card_html("banzai_score", "バンザイの姿勢"),
+        head=card_html("head_movement", "頭のブレ"),
+        shoulder=card_html("shoulder_tilt", "肩の傾き"),
+        torso=card_html("torso_tilt", "体幹の傾き"),
+        arm=card_html("arm_sag", "腕の垂れ下がり"),
+        foot=card_html("foot_sway", "接地足の横ブレ"),
+        leg=card_html("leg_lift", "足上げ高さ"),
+    )
+    st.markdown(cards_html, unsafe_allow_html=True)
 
 
 def extract_pose_from_video(video_path: str, resize_scale: float, frame_stride: int) -> pd.DataFrame:
@@ -595,7 +921,7 @@ def run_measurement(config: Dict) -> Dict:
 
 def render_start_view() -> None:
     st.title("💪 運動スコア自動採点アプリ")
-    st.write("スタートボタンを押して計測を開始しましょう。")
+    st.markdown("スタートボタンを押して計測を開始しましょう。")
 
     if not st.session_state.get("warmup_camera_initialized", False):
         camera_index = 0
@@ -660,7 +986,7 @@ def render_start_view() -> None:
                 csv_debug_df = None
 
     start_disabled = bool(st.session_state.get("measurement_ready")) or st.session_state.get("countdown_active", False)
-    if st.button("🟢 計測スタート", type="primary", use_container_width=True, disabled=start_disabled):
+    if st.button("🟢 計測スタート", type="primary", disabled=start_disabled):
         if csv_debug_df is not None:
             config = {
                 "mode": "csv",
@@ -844,7 +1170,7 @@ def render_banzai_test_view():
     from pathlib import Path
 
     st.header("🕺 Banzai Evaluation Test")
-    st.write("Run Banzai scoring for all CSVs in a selected folder.")
+    st.markdown("Run Banzai scoring for all CSVs in a selected folder.")
 
     folder = st.text_input("Enter folder path", "data_banzai_landmarks")
     if st.button("Run Banzai Evaluation"):
@@ -862,6 +1188,7 @@ def render_banzai_test_view():
 
 
 def render_result_view() -> None:
+    inject_research_ui_styles()
     result_df = st.session_state.get("result_df")
     frame_scores_df = st.session_state.get("frame_scores_df")
     if result_df is None:
@@ -874,77 +1201,83 @@ def render_result_view() -> None:
         st.info("スコアデータが見つかりませんでした。もう一度計測してください。")
         return
 
-    st.header("📊 採点結果")
     summary_row = summary_table.iloc[0]
     total_score = float(summary_row.get("total_score", np.nan))
     tier_color, tier_label, tier_message = describe_total_score(total_score)
-    total_score_text = "--" if not np.isfinite(total_score) else f"{total_score:.1f}"
+    # === HEADER: TOTAL SCORE ===
+    render_score_block(total_score, tier_label, tier_message)
 
-    score_card_html = f"""
-    <div style="text-align:center;padding:32px 0;">
-        <div style="font-size:20px;color:#7B7B7B;">総合スコア（0〜100）</div>
-        <div style="font-size:92px;font-weight:800;color:{tier_color};line-height:1;">
-            {total_score_text}
-        </div>
-        <div style="font-size:30px;font-weight:600;color:{tier_color};margin-top:8px;">
-            {tier_label}
-        </div>
-        <div style="font-size:16px;color:#555555;margin-top:4px;">
-            {tier_message}
-        </div>
-    </div>
-    """
-    st.markdown(score_card_html, unsafe_allow_html=True)
-
+    # === RADAR CHART ===
+    st.markdown('<div class="section-title">📊 モーションプロファイル</div>', unsafe_allow_html=True)
     english_keys = SCORE_COLUMNS
+    metric_labels = [METRIC_LABELS.get(k, k) for k in english_keys]
     values = [
         float(np.nan_to_num(summary_row.get(f"{k}_score", np.nan), nan=0.0))
         for k in english_keys
     ]
-    labels_closed = english_keys + [english_keys[0]]
+    labels_closed = metric_labels + [metric_labels[0]]
     radar_values = values + values[:1]
-
-    st.markdown("### 📊 モーションプロファイル")
+    angular_axis = dict(
+        categoryorder="array",
+        categoryarray=labels_closed,
+        rotation=0,
+        direction="clockwise",
+        tickfont=dict(color="#6B7280", size=11),
+        linecolor="#E5E7EB",
+        gridcolor="#E5E7EB",
+    )
+    radial_axis = dict(
+        visible=True,
+        range=[0, 100],
+        tickfont=dict(color="#6B7280", size=11),
+        gridcolor="#E5E7EB",
+        linecolor="#E5E7EB",
+    )
+    radar_primary_color = "#3B82F6"
     fig = go.Figure(
         data=go.Scatterpolar(
             r=radar_values,
             theta=labels_closed,
             fill="toself",
-            line_color="#4A90E2",
-            fillcolor="rgba(74,144,226,0.4)",
+            line_color=radar_primary_color,
+            fillcolor="rgba(59,130,246,0.3)",
         )
     )
     fig.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        polar=dict(
+            domain=dict(x=[0.15, 0.85], y=[0.0, 1.0]),
+            radialaxis=dict(range=[0, 100], showline=False, gridcolor="rgba(0,0,0,0.1)"),
+            angularaxis=dict(showline=False, gridcolor="rgba(0,0,0,0.05)"),
+        ),
         showlegend=False,
-        width=640,
-        height=520,
-        margin=dict(l=40, r=40, t=40, b=40),
+        autosize=False,
+        width=600,
+        height=500,
+        margin=dict(l=0, r=0, t=40, b=40),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#FFFFFF",
     )
-    if np.isfinite(total_score):
-        fig.add_annotation(
-            dict(
-                text=f"{total_score:.1f}",
-                x=0.5,
-                y=0.5,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                font=dict(color="#FF4081", size=44, family="Helvetica",),
-            )
-        )
-    st.plotly_chart(fig, use_container_width=True)
+    st.markdown('<div style="display:flex; justify-content:center;">', unsafe_allow_html=True)
+    st.plotly_chart(fig, use_container_width=False, config={"displayModeBar": False, "staticPlot": True})
+    st.markdown('</div>', unsafe_allow_html=True)
 
+    # === DETAIL CARDS ===
     render_metric_feedback_cards(summary_row)
 
+    # === ADDITIONAL GRAPHS ===
+    st.markdown('<div class="section-title">📈 追加グラフ</div>', unsafe_allow_html=True)
     if frame_scores_df is not None and not frame_scores_df.empty:
-        st.markdown("### ⏱ フレームごとの推移")
-        avg_frame_score = float(frame_scores_df["average_score"].mean(skipna=True)) if "average_score" in frame_scores_df else np.nan
+        st.markdown('<div class="subsection-title">⏱ フレームごとの推移</div>', unsafe_allow_html=True)
+        avg_frame_score = (
+            float(frame_scores_df["average_score"].mean(skipna=True))
+            if "average_score" in frame_scores_df
+            else np.nan
+        )
         if np.isfinite(avg_frame_score):
             st.metric("平均フレームスコア（重要指標）", f"{avg_frame_score:.1f} 点")
-        st.plotly_chart(build_frame_chart(frame_scores_df), use_container_width=True)
+        st.plotly_chart(build_frame_chart(frame_scores_df), width="stretch")
         with st.expander("フレーム別スコアを表示"):
-            st.dataframe(frame_scores_df, use_container_width=True)
+            st.dataframe(frame_scores_df)
 
         if "action" in frame_scores_df.columns:
             score_cols = [col for col in frame_scores_df.columns if col.endswith("_score")]
@@ -969,81 +1302,74 @@ def render_result_view() -> None:
                     if column_map:
                         display_df = display_df.rename(columns=column_map)
                     display_df = display_df.loc[:, ~display_df.columns.duplicated()]
-                    st.subheader("🧭 動作フェーズ別平均スコア")
-                    st.dataframe(display_df, use_container_width=True)
+                    # 動作フェーズ別平均スコアの棒グラフは削除
 
-                    combined_rows = {}
-                    for group_key, members in LEG_PHASE_GROUPS.items():
-                        existing_members = [m for m in members if m in action_means.index]
-                        if not existing_members:
-                            continue
-                        combined_rows[group_key] = action_means.loc[existing_members].mean().round(1)
-                    if combined_rows:
-                        combined_df = pd.DataFrame(combined_rows).T
-                        combined_df = combined_df.rename(index=lambda k: LEG_GROUP_LABELS.get(k, k))
-                        if column_map:
-                            combined_df = combined_df.rename(columns=column_map)
-                        combined_df = combined_df.loc[:, ~combined_df.columns.duplicated()]
-                        st.subheader("🦵 左右レッグ平均スコア")
-                        st.dataframe(combined_df, use_container_width=True)
-
-                    radar_groups = [
-                        group_key
-                        for group_key in LEG_PHASE_GROUPS
-                        if any(member in action_means.index for member in LEG_PHASE_GROUPS[group_key])
-                    ]
-                    radar_cols = st.columns(len(radar_groups)) if radar_groups else []
-                    for col_slot, group_key in zip(radar_cols, radar_groups):
-                        with col_slot:
-                            styles = LEG_RADAR_STYLES.get(group_key, [])
-                            traces = []
-                            metric_labels = [
-                                METRIC_LABELS.get(metric, metric)
-                                for metric in SCORE_COLUMNS
-                                if f"{metric}_score" in action_means.columns
-                            ]
-                            if not metric_labels:
+                    def build_leg_radar(group_key: str) -> Optional[go.Figure]:
+                        styles = LEG_RADAR_STYLES.get(group_key, [])
+                        metric_keys = [
+                            metric
+                            for metric in SCORE_COLUMNS
+                            if metric != "banzai_score" and f"{metric}_score" in action_means.columns
+                        ]
+                        if not metric_keys:
+                            return None
+                        metric_labels_group = [METRIC_LABELS.get(metric, metric) for metric in metric_keys]
+                        if not metric_labels_group:
+                            return None
+                        labels_closed_group = metric_labels_group + [metric_labels_group[0]]
+                        fig_action = go.Figure()
+                        for phase_key, suffix, line_color, fill_color in styles:
+                            if phase_key not in action_means.index:
                                 continue
-                            labels_closed = metric_labels + [metric_labels[0]]
-                            fig_action = go.Figure()
-                            for phase_key, suffix, line_color, fill_color in styles:
-                                if phase_key not in action_means.index:
-                                    continue
-                                per_action_values = [
-                                    float(action_means.loc[phase_key, f"{metric}_score"])
-                                    for metric in SCORE_COLUMNS
-                                    if f"{metric}_score" in action_means.columns
-                                ]
-                                if not per_action_values:
-                                    continue
-                                values_closed = per_action_values + per_action_values[:1]
-                                fig_action.add_trace(
-                                    go.Scatterpolar(
-                                        r=values_closed,
-                                        theta=labels_closed,
-                                        fill="toself",
-                                        name=f"{ACTION_LABELS.get(phase_key, phase_key)} {suffix}",
-                                        line_color=line_color,
-                                        fillcolor=fill_color,
-                                        opacity=1.0,
-                                    )
+                            per_action_values = []
+                            for metric in metric_keys:
+                                column_name = f"{metric}_score"
+                                if column_name in action_means.columns:
+                                    per_action_values.append(float(action_means.loc[phase_key, column_name]))
+                            if not per_action_values:
+                                per_action_values = [0.0] * len(metric_keys)
+                            if not per_action_values:
+                                continue
+                            values_closed = per_action_values + per_action_values[:1]
+                            fig_action.add_trace(
+                                go.Scatterpolar(
+                                    r=values_closed,
+                                    theta=labels_closed_group,
+                                    fill="toself",
+                                    name=f"{ACTION_LABELS.get(phase_key, phase_key)} {suffix}",
+                                    line_color=line_color,
+                                    fillcolor=fill_color,
+                                    opacity=1.0,
                                 )
-                            if not fig_action.data:
-                                continue
-                            fig_action.update_layout(
-                                title=dict(text=LEG_RADAR_TITLES.get(group_key, group_key), x=0.5, font=dict(size=16)),
-                                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                                showlegend=True,
-                                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-                                margin=dict(l=20, r=20, t=60, b=60),
-                                height=360,
                             )
-                            st.plotly_chart(fig_action, use_container_width=True)
+                        if not fig_action.data:
+                            return None
+                        fig_action.update_layout(
+                            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                            margin=dict(l=20, r=20, t=60, b=60),
+                            height=360,
+                        )
+                        return fig_action
+
+                    leg_radars = []
+                    for group_key in ["right_leg", "left_leg"]:
+                        radar_fig = build_leg_radar(group_key)
+                        if radar_fig is not None:
+                            leg_radars.append((group_key, radar_fig))
+                    if leg_radars:
+                        st.markdown('<div class="subsection-title">🦵 左右レッグ平均スコア</div>', unsafe_allow_html=True)
+                        cols = st.columns(len(leg_radars))
+                        for col_slot, (group_key, radar_fig) in zip(cols, leg_radars):
+                            with col_slot:
+                                st.subheader(LEG_RADAR_TITLES.get(group_key, group_key))
+                                st.plotly_chart(radar_fig, width="stretch")
 
     with st.expander("スコア詳細テーブルを表示"):
-        st.dataframe(summary_table, use_container_width=True)
+        st.dataframe(summary_table)
 
-    st.write("---")
+    st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
         if st.session_state.get("frame_scores_csv") is not None:
@@ -1052,7 +1378,6 @@ def render_result_view() -> None:
                 data=st.session_state["frame_scores_csv"],
                 file_name="frame_scores.csv",
                 mime="text/csv",
-                use_container_width=True,
             )
         if st.session_state.get("pose_csv_bytes") is not None:
             st.download_button(
@@ -1060,10 +1385,9 @@ def render_result_view() -> None:
                 data=st.session_state["pose_csv_bytes"],
                 file_name="pose_landmarks.csv",
                 mime="text/csv",
-                use_container_width=True,
             )
     with col2:
-        st.button("🔁 再計測", on_click=reset_measurement_state, use_container_width=True)
+        st.button("🔁 再計測", on_click=reset_measurement_state)
 
 
 def main() -> None:

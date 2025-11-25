@@ -23,36 +23,35 @@ from calculate_metrics import (
 from calculate_metrics import batch_evaluate_banzai
 from pose_extract import capture_pose_from_camera, video_to_pose_csv
 
-st.set_page_config(page_title="運動スコア自動採点アプリ", layout="centered")
+st.set_page_config(page_title="Motion Score Auto Evaluation App", layout="centered")
 
 REFERENCE_VIDEO_PATH = Path("otehon.mp4")
 METRIC_LABELS = {
-    "head_movement": "頭のブレ",
-    "shoulder_tilt": "肩の傾き",
-    "torso_tilt": "体幹の傾き",
-    "leg_lift": "足上げ高さ",
-    "foot_sway": "接地足の横ブレ",
-    "arm_sag": "腕の垂れ下がり",
-    "banzai_score": "バンザイ姿勢",
-    "average_score": "平均スコア",
+    "head_movement": "Head Stability",
+    "shoulder_tilt": "Shoulder Tilt",
+    "torso_tilt": "Torso Lean",
+    "leg_lift": "Leg Lift Height",
+    "foot_sway": "Foot Sway",
+    "arm_sag": "Arm Drop",
+    "banzai_score": "Banzai Posture",
+    "average_score": "Average Score",
 }
 SCORE_COLORS = {
-    "バンザイの姿勢": "#1E3A8A",
-    "バンザイ姿勢": "#1E3A8A",
-    "頭のブレ": "#EC4899",
-    "肩の傾き": "#3B82F6",
-    "体幹の傾き": "#0EA5E9",
-    "腕の垂れ下がり": "#F59E0B",
-    "接地足の横ブレ": "#10B981",
-    "足上げ高さ": "#8B5CF6",
+    "Banzai Posture": "#1E3A8A",
+    "Head Stability": "#EC4899",
+    "Shoulder Tilt": "#3B82F6",
+    "Torso Lean": "#0EA5E9",
+    "Arm Drop": "#F59E0B",
+    "Foot Sway": "#10B981",
+    "Leg Lift Height": "#8B5CF6",
 }
 NEUTRAL_COLOR = "#9CA3AF"
 
 ACTION_LABELS = {
-    "right_leg_1": "右足上げ (1回目)",
-    "right_leg_2": "右足上げ (2回目)",
-    "left_leg_1": "左足上げ (1回目)",
-    "left_leg_2": "左足上げ (2回目)",
+    "right_leg_1": "Right Leg Lift (Attempt 1)",
+    "right_leg_2": "Right Leg Lift (Attempt 2)",
+    "left_leg_1": "Left Leg Lift (Attempt 1)",
+    "left_leg_2": "Left Leg Lift (Attempt 2)",
 }
 
 LEG_PHASE_ORDER = ["right_leg_1", "left_leg_1", "right_leg_2", "left_leg_2"]
@@ -61,8 +60,8 @@ LEG_PHASE_GROUPS = {
     "left_leg": ["left_leg_1", "left_leg_2"],
 }
 LEG_GROUP_LABELS = {
-    "right_leg": "右足平均",
-    "left_leg": "左足平均",
+    "right_leg": "Right Leg Average",
+    "left_leg": "Left Leg Average",
 }
 LEG_PHASE_SHADING = [
     ("right_leg_1", 15, 29, "skyblue"),
@@ -77,27 +76,27 @@ ATTEMPT_FILL_BLUE = "rgba(0,123,255,0.6)"
 AVERAGE_SCORE_COLOR = NEUTRAL_COLOR
 LEG_RADAR_STYLES = {
     "right_leg": [
-        ("right_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
-        ("right_leg_2", "2回目", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
+        ("right_leg_1", "Attempt 1", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
+        ("right_leg_2", "Attempt 2", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
     ],
     "left_leg": [
-        ("left_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
-        ("left_leg_2", "2回目", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
+        ("left_leg_1", "Attempt 1", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
+        ("left_leg_2", "Attempt 2", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
     ],
 }
 LEG_RADAR_TITLES = {
-    "right_leg": "右足上げ（1回目・2回目）",
-    "left_leg": "左足上げ（1回目・2回目）",
+    "right_leg": "Right Leg Lifts (Attempts 1 & 2)",
+    "left_leg": "Left Leg Lifts (Attempts 1 & 2)",
 }
 SCORE_TIER_RULES = [
-    (85, "#2ECC71", "Excellent", "動きが非常に安定しています"),
-    (70, "#2979FF", "Good", "バランス良く動けています"),
-    (55, "#FFB300", "Fair", "動作の安定性をさらに高めましょう"),
-    (0, "#FF4081", "Needs Improvement", "改善の余地があります"),
+    (85, "#2ECC71", "Excellent", "Movement is exceptionally stable."),
+    (70, "#2979FF", "Good", "Great balance throughout the motion."),
+    (55, "#FFB300", "Fair", "Keep refining overall stability."),
+    (0, "#FF4081", "Needs Improvement", "There is still room to improve the form."),
 ]
 DEFAULT_SCORE_COLOR = "#FF4081"
 DEFAULT_SCORE_LABEL = "No Score"
-DEFAULT_SCORE_MESSAGE = "計測データが不足しています"
+DEFAULT_SCORE_MESSAGE = "Not enough measurement data is available."
 
 
 def hex_to_rgba(hex_color: str, alpha: float) -> str:
@@ -122,45 +121,45 @@ def get_metric_color_by_key(metric_key: str) -> str:
     return get_metric_color_by_title(get_metric_title(metric_key))
 METRIC_FEEDBACK_TEMPLATES = {
     "head_movement": {
-        "high": "頭部が安定しており視線がぶれません。",
-        "mid": "頭部のブレは小さいですが維持を意識しましょう。",
-        "low": "頭部の揺れを抑える意識を高めてください。",
+        "high": "Head stays steady with no noticeable wobble.",
+        "mid": "Head movement is minor - keep focusing on stability.",
+        "low": "Focus on reducing head sway during the motion.",
     },
     "shoulder_tilt": {
-        "high": "肩のラインが水平に保たれています。",
-        "mid": "肩の傾きは許容範囲ですがさらに安定させましょう。",
-        "low": "左右の肩の高さを揃える意識を持ちましょう。",
+        "high": "Shoulder line remains level.",
+        "mid": "Shoulders are acceptable but can be steadier.",
+        "low": "Work on keeping both shoulders at the same height.",
     },
     "torso_tilt": {
-        "high": "体幹がまっすぐ維持できています。",
-        "mid": "体幹は概ね安定。呼吸を合わせてブレを抑えましょう。",
-        "low": "上体が揺れているので姿勢のキープを意識してください。",
+        "high": "Torso stays upright throughout the motion.",
+        "mid": "Torso is mostly stable - coordinate breathing to reduce sway.",
+        "low": "Upper body is wobbling; keep the core engaged.",
     },
     "leg_lift": {
-        "high": "足上げ高さは十分です。",
-        "mid": "もう少し高く上げるとさらに評価が上がります。",
-        "low": "足を大きく引き上げる動きを意識しましょう。",
+        "high": "Leg lift height is sufficient.",
+        "mid": "Lifting a bit higher will boost the score.",
+        "low": "Drive the knee higher to emphasize the lift.",
     },
     "foot_sway": {
-        "high": "接地足が安定し軸がぶれていません。",
-        "mid": "接地足は概ね安定。体重の乗せ方を一定にしましょう。",
-        "low": "接地足が揺れているため軸を意識して立ちましょう。",
+        "high": "Supporting foot is steady with a solid axis.",
+        "mid": "Footing is mostly stable - keep the weight placement consistent.",
+        "low": "Grounded foot is swaying; focus on building a stable axis.",
     },
     "arm_sag": {
-        "high": "腕の高さをしっかり保てています。",
-        "mid": "腕は保てていますが肩からの引き上げを意識しましょう。",
-        "low": "腕が下がりやすいので肘を高く維持しましょう。",
+        "high": "Arms stay lifted throughout the motion.",
+        "mid": "Arms hold up but engage the shoulders to lift more.",
+        "low": "Arms drop easily - keep elbows lifted and active.",
     },
     "banzai_score": {
-        "high": "バンザイ姿勢が美しくキープできています。",
-        "mid": "バンザイ姿勢は概ね良好。フィニッシュを丁寧に。",
-        "low": "肩と腕を大きく伸ばし、姿勢を保ちましょう。",
+        "high": "Banzai posture is crisp and well held.",
+        "mid": "Banzai posture is mostly good - finish with intent.",
+        "low": "Extend the shoulders and arms fully to hold the pose.",
     },
 }
 DEFAULT_FEEDBACK_TEMPLATE = {
-    "high": "動きが安定しています。",
-    "mid": "引き続き安定性を意識しましょう。",
-    "low": "改善ポイントを意識して動作を整えましょう。",
+    "high": "Motion is stable and balanced.",
+    "mid": "Stay mindful of stability as you move.",
+    "low": "Focus on the improvement cues to refine your form.",
 }
 DETAIL_CARD_METRICS = [
     "head_movement",
@@ -172,13 +171,13 @@ DETAIL_CARD_METRICS = [
     "banzai_score",
 ]
 METRIC_TITLE_OVERRIDES = {
-    "banzai_score": "バンザイの姿勢",
-    "head_movement": "頭のブレ",
-    "shoulder_tilt": "肩の傾き",
-    "torso_tilt": "体幹の傾き",
-    "leg_lift": "足上げ高さ",
-    "foot_sway": "接地足の横ブレ",
-    "arm_sag": "腕の垂れ下がり",
+    "banzai_score": "Banzai Posture",
+    "head_movement": "Head Stability",
+    "shoulder_tilt": "Shoulder Tilt",
+    "torso_tilt": "Torso Lean",
+    "leg_lift": "Leg Lift Height",
+    "foot_sway": "Foot Sway",
+    "arm_sag": "Arm Drop",
 }
 RESEARCH_UI_CSS = """
 <style>
@@ -330,7 +329,7 @@ def score_to_color(score: float) -> str:
 def select_metric_feedback(metric_key: str, score: float) -> str:
     template = METRIC_FEEDBACK_TEMPLATES.get(metric_key, DEFAULT_FEEDBACK_TEMPLATE)
     if not np.isfinite(score):
-        return "データ不足のため評価できませんでした。"
+        return "Unable to evaluate due to insufficient data."
     if score >= 75:
         return template.get("high") or DEFAULT_FEEDBACK_TEMPLATE["high"]
     if score >= 50:
@@ -348,7 +347,7 @@ def render_score_block(score: float, label: str, comment_text: str) -> None:
             label_bg, label_border, label_color = "#DBEAFE", "#3B82F6", "#1E40AF"
         else:
             label_bg, label_border, label_color = "#DCFCE7", "#22C55E", "#14532D"
-        score_text = f"{score:.1f}点"
+        score_text = f"{score:.1f} pts"
     else:
         label_bg, label_border, label_color = "#E5E7EB", "#9CA3AF", "#374151"
         score_text = "--"
@@ -423,27 +422,27 @@ def render_metric_card_html(title: str, score: float, comment: str) -> str:
     image_bytes = fig.to_image(format="png", width=240, height=240, scale=2)
     encoded_image = base64.b64encode(image_bytes).decode("ascii")
     title_html = escape(title)
-    score_text = "-- 点" if not np.isfinite(display_value) else f"{display_value:.1f} 点"
+    score_text = "-- pts" if not np.isfinite(display_value) else f"{display_value:.1f} pts"
     raw_comment = (comment or "").strip()
-    is_banzai = title == "バンザイの姿勢"
+    is_banzai = title == "Banzai Posture"
     if is_banzai:
         detail_lines = [raw_comment] if raw_comment else []
         detail_lines.extend(
             [
-                "両腕の角度を揃え、肩を後ろへ引くと安定します。",
-                "頭部と体幹のラインをまっすぐに保ち続けましょう。",
+                "Match the angle of both arms and draw the shoulders back for stability.",
+                "Keep the head and torso aligned in a straight line.",
             ]
         )
         comment_text = "\n".join(line for line in detail_lines if line)
         if not comment_text:
-            comment_text = "バンザイ姿勢の評価データが不足しています。"
+            comment_text = "Banzai posture score data is missing."
         comment_class = "metric-comment long-comment"
         card_modifier = " long"
         comment_html = escape(comment_text)
     else:
         comment_class = "metric-comment"
         card_modifier = ""
-        comment_text = raw_comment or "データ不足のため評価できませんでした。"
+        comment_text = raw_comment or "Unable to evaluate due to insufficient data."
         comment_html = escape(comment_text).replace("\n", "<br />")
     return (
         f'<div class="metric-card{card_modifier}">'
@@ -524,7 +523,7 @@ def render_reference_video_element(
     Render the reference video with consistent options or show a fallback message.
     """
     if not REFERENCE_VIDEO_PATH.exists():
-        placeholder.info("お手本動画が見つかりません。")
+        placeholder.info("Reference video not found.")
         return
     placeholder.video(
         str(REFERENCE_VIDEO_PATH),
@@ -577,7 +576,7 @@ def crop_to_aspect_ratio(frame: np.ndarray, target_ratio: float = DISPLAY_ASPECT
 def init_session_state() -> None:
     defaults = {
         "page": "start",
-        "source_type": "動画アップロード",
+        "source_type": "Video Upload",
         "measurement_config": None,
         "measurement_ready": False,
         "result_df": None,
@@ -782,7 +781,7 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             y=[None],
             mode="lines",
             line=dict(color="skyblue", width=14),
-            name="背景色: 右足上げフェーズ",
+            name="Background: Right Leg Lift Phase",
             legendrank=1000,
         )
     )
@@ -792,7 +791,7 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             y=[None],
             mode="lines",
             line=dict(color="lightpink", width=14),
-            name="背景色: 左足上げフェーズ",
+            name="Background: Left Leg Lift Phase",
             legendrank=1001,
         )
     )
@@ -800,18 +799,18 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
 
 
 def render_metric_feedback_cards(result_row: pd.Series) -> None:
-    st.markdown('<div class="section-title">🧩 詳細指標</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🧩 Detailed Metrics</div>', unsafe_allow_html=True)
     card_order = [
-        ("banzai_score", "バンザイの姿勢"),
-        ("head_movement", "頭のブレ"),
-        ("shoulder_tilt", "肩の傾き"),
-        ("torso_tilt", "体幹の傾き"),
-        ("arm_sag", "腕の垂れ下がり"),
-        ("foot_sway", "接地足の横ブレ"),
-        ("leg_lift", "足上げ高さ"),
+        ("banzai_score", "Banzai Posture"),
+        ("head_movement", "Head Stability"),
+        ("shoulder_tilt", "Shoulder Tilt"),
+        ("torso_tilt", "Torso Lean"),
+        ("arm_sag", "Arm Drop"),
+        ("foot_sway", "Foot Sway"),
+        ("leg_lift", "Leg Lift Height"),
     ]
     if not any(f"{key}_score" in result_row.index for key, _ in card_order):
-        st.info("指標スコアがまだ計算されていません。")
+        st.info("Metric scores have not been calculated yet.")
         return
     def card_html(metric_key: str, title: str) -> str:
         score_val = float(result_row.get(f"{metric_key}_score", np.nan))
@@ -837,13 +836,13 @@ def render_metric_feedback_cards(result_row: pd.Series) -> None:
     </div>
 </div>
 """.format(
-        banzai=card_html("banzai_score", "バンザイの姿勢"),
-        head=card_html("head_movement", "頭のブレ"),
-        shoulder=card_html("shoulder_tilt", "肩の傾き"),
-        torso=card_html("torso_tilt", "体幹の傾き"),
-        arm=card_html("arm_sag", "腕の垂れ下がり"),
-        foot=card_html("foot_sway", "接地足の横ブレ"),
-        leg=card_html("leg_lift", "足上げ高さ"),
+        banzai=card_html("banzai_score", "Banzai Posture"),
+        head=card_html("head_movement", "Head Stability"),
+        shoulder=card_html("shoulder_tilt", "Shoulder Tilt"),
+        torso=card_html("torso_tilt", "Torso Lean"),
+        arm=card_html("arm_sag", "Arm Drop"),
+        foot=card_html("foot_sway", "Foot Sway"),
+        leg=card_html("leg_lift", "Leg Lift Height"),
     )
     st.markdown(cards_html, unsafe_allow_html=True)
 
@@ -920,8 +919,8 @@ def run_measurement(config: Dict) -> Dict:
 
 
 def render_start_view() -> None:
-    st.title("💪 運動スコア自動採点アプリ")
-    st.markdown("スタートボタンを押して計測を開始しましょう。")
+    st.title("💪 Motion Score Auto Evaluation App")
+    st.markdown("Press the start button to begin a new measurement.")
 
     if not st.session_state.get("warmup_camera_initialized", False):
         camera_index = 0
@@ -929,7 +928,7 @@ def render_start_view() -> None:
         try:
             cap = cv2.VideoCapture(camera_index)
             if not cap.isOpened():
-                raise RuntimeError("カメラを初期化できませんでした。")
+                raise RuntimeError("Failed to initialize the camera.")
             for _ in range(10):
                 ok, _ = cap.read()
                 if not ok:
@@ -937,19 +936,19 @@ def render_start_view() -> None:
             st.session_state["warmup_camera"] = cap
             st.session_state["warmup_camera_initialized"] = True
             st.session_state["camera_warmed"] = True
-            st.info("📸 カメラのウォームアップが完了しました。")
+            st.info("📸 Camera warm-up completed.")
         except Exception as exc:
             if cap is not None:
                 cap.release()
             release_warmup_camera()
-            st.warning(f"カメラのウォームアップに失敗しました: {exc}")
+            st.warning(f"Camera warm-up failed: {exc}")
     elif st.session_state.get("camera_warmed"):
-        st.caption("📸 カメラの準備が整っています。")
+        st.caption("📸 Camera is ready.")
 
     st.session_state["source_type"] = st.radio(
-        "入力ソースを選択",
-        ["動画アップロード", "Webカメラ"],
-        index=0 if st.session_state["source_type"] == "動画アップロード" else 1,
+        "Select input source",
+        ["Video Upload", "Webcam"],
+        index=0 if st.session_state["source_type"] == "Video Upload" else 1,
         horizontal=True,
     )
 
@@ -959,43 +958,43 @@ def render_start_view() -> None:
     capture_seconds = 8
     target_fps = 15
 
-    if st.session_state["source_type"] == "動画アップロード":
-        video_file = st.file_uploader("動画ファイルを選択 (mp4 / mov / avi / mkv)", type=["mp4", "mov", "avi", "mkv"])
+    if st.session_state["source_type"] == "Video Upload":
+        video_file = st.file_uploader("Select a video file (mp4 / mov / avi / mkv)", type=["mp4", "mov", "avi", "mkv"])
         col1, col2 = st.columns(2)
-        resize_scale = col1.slider("縮小倍率（軽量化）", 0.3, 1.0, 0.7, 0.1)
-        frame_stride = col2.slider("フレーム間引き", 1, 5, 1, 1)
+        resize_scale = col1.slider("Resize scale (lighter processing)", 0.3, 1.0, 0.7, 0.1)
+        frame_stride = col2.slider("Frame stride", 1, 5, 1, 1)
     else:
         col1, col2, col3 = st.columns(3)
         default_capture = max(3, int(round(REFERENCE_DURATION_SECONDS)))
         slider_max = max(default_capture, 20)
-        capture_seconds = col1.slider("計測時間（秒）", 3, slider_max, default_capture)
-        frame_stride = col2.slider("フレーム間引き", 1, 5, 1, 1)
-        resize_scale = col3.slider("縮小倍率（軽量化）", 0.4, 1.0, 0.7, 0.1)
+        capture_seconds = col1.slider("Capture duration (seconds)", 3, slider_max, default_capture)
+        frame_stride = col2.slider("Frame stride", 1, 5, 1, 1)
+        resize_scale = col3.slider("Resize scale (lighter processing)", 0.4, 1.0, 0.7, 0.1)
 
     csv_debug_df = None
     csv_debug_file = None
-    with st.expander("🔧 Expert Mode (CSV デバッグ)"):
-        csv_debug_file = st.file_uploader("骨格CSVを直接アップロード", type=["csv"], key="csv_debug_uploader")
+    with st.expander("🔧 Expert Mode (CSV Debug)"):
+        csv_debug_file = st.file_uploader("Upload skeleton CSV directly", type=["csv"], key="csv_debug_uploader")
         if csv_debug_file is not None:
             try:
                 csv_debug_file.seek(0)
                 csv_debug_df = pd.read_csv(csv_debug_file)
-                st.success("CSVを読み込みました。")
+                st.success("CSV loaded successfully.")
             except Exception as exc:
-                st.error(f"CSVの読み込みに失敗しました: {exc}")
+                st.error(f"Failed to load CSV: {exc}")
                 csv_debug_df = None
 
     start_disabled = bool(st.session_state.get("measurement_ready")) or st.session_state.get("countdown_active", False)
-    if st.button("🟢 計測スタート", type="primary", disabled=start_disabled):
+    if st.button("🟢 Start Measurement", type="primary", disabled=start_disabled):
         if csv_debug_df is not None:
             config = {
                 "mode": "csv",
                 "dataframe": csv_debug_df,
                 "label": csv_debug_file.name if csv_debug_file else "csv_input",
             }
-        elif st.session_state["source_type"] == "動画アップロード":
+        elif st.session_state["source_type"] == "Video Upload":
             if video_file is None:
-                st.warning("動画ファイルを選択してください。")
+                st.warning("Please select a video file.")
                 return
             tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=Path(video_file.name).suffix)
             tmp_video.write(video_file.getbuffer())
@@ -1037,10 +1036,10 @@ def render_measuring_view() -> None:
         return
 
     if st.session_state.get("countdown_active"):
-        st.header("🎬 計測開始準備中…")
+        st.header("🎬 Preparing Measurement...")
         message_placeholder = st.empty()
         countdown_placeholder = st.empty()
-        message_placeholder.info("🎬 計測開始までお待ちください…")
+        message_placeholder.info("🎬 Please wait until the measurement begins...")
         duration = int(st.session_state.get("countdown_duration", COUNTDOWN_SECONDS) or COUNTDOWN_SECONDS)
         for value in range(duration, 0, -1):
             countdown_placeholder.markdown(
@@ -1055,7 +1054,7 @@ def render_measuring_view() -> None:
         countdown_placeholder.markdown(
             """
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh;">
-                <div style="font-size:6rem; font-weight:700; color:#43AA8B; line-height:1;">スタート!</div>
+                <div style="font-size:6rem; font-weight:700; color:#43AA8B; line-height:1;">Start!</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1066,31 +1065,31 @@ def render_measuring_view() -> None:
         st.rerun()
         return
 
-    st.header("🏃‍♀️ 計測中…")
+    st.header("🏃‍♀️ Measuring...")
     col1, col2 = st.columns([1, 1])
     reference_video_placeholder = None
     with col1:
-        st.subheader("お手本")
+        st.subheader("Reference")
         reference_video_placeholder = st.empty()
         if not st.session_state.get("measurement_ready"):
-            reference_video_placeholder.info("カウントダウン完了後にお手本動画が再生されます。")
+            reference_video_placeholder.info("The reference video will play after the countdown finishes.")
     live_placeholder = None
     with col2:
-        st.subheader("あなたの動き")
+        st.subheader("Your Movement")
         if config["mode"] == "video":
             st.video(config["video_path"])
         elif config["mode"] == "webcam":
             live_placeholder = st.empty()
-            live_placeholder.info("Webカメラ映像を初期化しています…")
+            live_placeholder.info("Initializing webcam feed...")
         else:
-            st.info("CSVデータを解析しています…")
+            st.info("Analyzing CSV data...")
 
     phase_placeholder = st.empty()
     if config["mode"] != "webcam":
-        phase_placeholder.markdown("**🏃‍♀️ 計測中：解析中…**")
+        phase_placeholder.markdown("**🏃‍♀️ Measuring: Processing...**")
 
-    st.markdown("### 🏃‍♀️ 計測中です…")
-    st.caption("分析が完了すると自動的に結果画面へ移動します。")
+    st.markdown("### 🏃‍♀️ Measurement in progress...")
+    st.caption("You will be redirected to the results screen once analysis is complete.")
 
     config_for_run = dict(config)
     if config["mode"] == "webcam":
@@ -1112,8 +1111,8 @@ def render_measuring_view() -> None:
                 caption=f"Frame {frame_idx}",
             )
             action_key = classify_action(frame_idx)
-            phase_label = ACTION_LABELS.get(action_key, "動作中")
-            phase_placeholder.markdown(f"**🏃‍♀️ 計測中：{phase_label}**")
+            phase_label = ACTION_LABELS.get(action_key, "In motion")
+            phase_placeholder.markdown(f"**🏃‍♀️ Measuring: {phase_label}**")
 
         config_for_run["frame_callback"] = frame_callback
 
@@ -1128,7 +1127,7 @@ def render_measuring_view() -> None:
     if measurement_ready:
         measurement_result: Dict = {}
         try:
-            with st.spinner("分析中…"):
+            with st.spinner("Analyzing..."):
                 measurement_result = run_measurement(config_for_run)
         finally:
             st.session_state["measurement_ready"] = False
@@ -1148,8 +1147,8 @@ def render_measuring_view() -> None:
 
 
 def render_waiting_view() -> None:
-    st.header("🧠 分析しています…")
-    st.info("まもなく結果を表示します。")
+    st.header("🧠 Analyzing...")
+    st.info("Results will appear shortly.")
     wait_until = st.session_state.get("wait_until")
     if wait_until is None or time.time() >= wait_until:
         st.session_state["page"] = "result"
@@ -1198,7 +1197,7 @@ def render_result_view() -> None:
 
     summary_table = build_summary_display_df(result_df)
     if summary_table is None or summary_table.empty:
-        st.info("スコアデータが見つかりませんでした。もう一度計測してください。")
+        st.info("No score data was found. Please run another measurement.")
         return
 
     summary_row = summary_table.iloc[0]
@@ -1208,7 +1207,7 @@ def render_result_view() -> None:
     render_score_block(total_score, tier_label, tier_message)
 
     # === RADAR CHART ===
-    st.markdown('<div class="section-title">📊 モーションプロファイル</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📊 Motion Profile</div>', unsafe_allow_html=True)
     english_keys = SCORE_COLUMNS
     metric_labels = [METRIC_LABELS.get(k, k) for k in english_keys]
     values = [
@@ -1265,18 +1264,18 @@ def render_result_view() -> None:
     render_metric_feedback_cards(summary_row)
 
     # === ADDITIONAL GRAPHS ===
-    st.markdown('<div class="section-title">📈 追加グラフ</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📈 Additional Charts</div>', unsafe_allow_html=True)
     if frame_scores_df is not None and not frame_scores_df.empty:
-        st.markdown('<div class="subsection-title">⏱ フレームごとの推移</div>', unsafe_allow_html=True)
+        st.markdown('<div class="subsection-title">⏱ Frame-by-Frame Trends</div>', unsafe_allow_html=True)
         avg_frame_score = (
             float(frame_scores_df["average_score"].mean(skipna=True))
             if "average_score" in frame_scores_df
             else np.nan
         )
         if np.isfinite(avg_frame_score):
-            st.metric("平均フレームスコア（重要指標）", f"{avg_frame_score:.1f} 点")
+            st.metric("Average Frame Score (Key Metric)", f"{avg_frame_score:.1f} pts")
         st.plotly_chart(build_frame_chart(frame_scores_df), width="stretch")
-        with st.expander("フレーム別スコアを表示"):
+        with st.expander("Show frame-by-frame scores"):
             st.dataframe(frame_scores_df)
 
         if "action" in frame_scores_df.columns:
@@ -1298,11 +1297,11 @@ def render_result_view() -> None:
                             metric_key = col_name.replace("_score", "")
                             column_map[col_name] = f"{METRIC_LABELS.get(metric_key, metric_key)}(score)"
                         elif col_name == "average_score":
-                            column_map[col_name] = "平均スコア"
+                            column_map[col_name] = "Average Score"
                     if column_map:
                         display_df = display_df.rename(columns=column_map)
                     display_df = display_df.loc[:, ~display_df.columns.duplicated()]
-                    # 動作フェーズ別平均スコアの棒グラフは削除
+                    # Removed bar chart for action phase average scores
 
                     def build_leg_radar(group_key: str) -> Optional[go.Figure]:
                         styles = LEG_RADAR_STYLES.get(group_key, [])
@@ -1359,14 +1358,14 @@ def render_result_view() -> None:
                         if radar_fig is not None:
                             leg_radars.append((group_key, radar_fig))
                     if leg_radars:
-                        st.markdown('<div class="subsection-title">🦵 左右レッグ平均スコア</div>', unsafe_allow_html=True)
+                        st.markdown('<div class="subsection-title">🦵 Left vs Right Leg Average Scores</div>', unsafe_allow_html=True)
                         cols = st.columns(len(leg_radars))
                         for col_slot, (group_key, radar_fig) in zip(cols, leg_radars):
                             with col_slot:
                                 st.subheader(LEG_RADAR_TITLES.get(group_key, group_key))
                                 st.plotly_chart(radar_fig, width="stretch")
 
-    with st.expander("スコア詳細テーブルを表示"):
+    with st.expander("Show detailed score table"):
         st.dataframe(summary_table)
 
     st.markdown("---")
@@ -1374,20 +1373,20 @@ def render_result_view() -> None:
     with col1:
         if st.session_state.get("frame_scores_csv") is not None:
             st.download_button(
-                "💾 フレームスコアをCSVで保存",
+                "💾 Save frame scores as CSV",
                 data=st.session_state["frame_scores_csv"],
                 file_name="frame_scores.csv",
                 mime="text/csv",
             )
         if st.session_state.get("pose_csv_bytes") is not None:
             st.download_button(
-                "💾 骨格データをCSVで保存",
+                "💾 Save pose data as CSV",
                 data=st.session_state["pose_csv_bytes"],
                 file_name="pose_landmarks.csv",
                 mime="text/csv",
             )
     with col2:
-        st.button("🔁 再計測", on_click=reset_measurement_state)
+        st.button("🔁 Measure Again", on_click=reset_measurement_state)
 
 
 def main() -> None:

@@ -2,6 +2,8 @@ streamlit
 pandas
 numpy
 plotly
+matplotlib
+scipy
 kaleido
 
 mediapipe==0.10.14

@@ -804,7 +804,7 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
 
 
 def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
-    data = violin_data or VIOLIN_DATA.get("head_stability", {})
+    data = violin_data or DEFAULT_VIOLIN_DATA
     st.markdown(
         '<div class="subsection-title">🎻 Head Stability Distribution (Right = Top, Left = Bottom)</div>',
         unsafe_allow_html=True,
@@ -822,12 +822,7 @@ def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
         st.info("Not enough data points to build the violin plot.")
         return
 
-    right_p95 = data.get("right_p95")
-    left_p95 = data.get("left_p95")
-    xmin = 0.0
-    xmax_candidates = [v for v in [right_p95, left_p95] if isinstance(v, (int, float))]
-    xmax = max(xmax_candidates) if xmax_candidates else 0.05
-    xs = np.linspace(xmin, xmax, 400)
+    xs = np.linspace(HEAD_VIOLIN_XMIN, HEAD_VIOLIN_XMAX, 400)
 
     def _normalized_density(samples: np.ndarray) -> Optional[np.ndarray]:
         if np.allclose(samples, samples[0]):
@@ -867,7 +862,7 @@ def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
         ax.axvline(user_left, color="#007BFF", linestyle="--", linewidth=2)
 
     max_density = float(max(np.max(density_right), np.max(density_left)))
-    ax.set_xlim(xmin, xmax)
+    ax.set_xlim(HEAD_VIOLIN_XMIN, HEAD_VIOLIN_XMAX)
     ax.set_ylim(-1.05 * max_density, 1.05 * max_density)
     ax.set_yticks([0.3, -0.3])
     ax.set_yticklabels(["Right Foot", "Left Foot"])
@@ -981,9 +976,13 @@ def draw_all_violin_plots(violin_dataset: Dict[str, Dict[str, Any]]) -> None:
 
 
 def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
-    """Render a mirrored violin identical to the head-stability style."""
+    """
+    Draw a mirrored KDE violin plot (Right = top, Left = bottom).
+    Only user values are shown as solid vertical lines.
+    """
     right_samples = np.asarray(data.get("right_population", []), dtype=float)
     left_samples = np.asarray(data.get("left_population", []), dtype=float)
+
     right_samples = right_samples[np.isfinite(right_samples)]
     left_samples = left_samples[np.isfinite(left_samples)]
 
@@ -991,34 +990,23 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
         print(f"{metric_name}: No valid data.")
         return
 
-    xmax_candidates = [
-        val
-        for val in (data.get("right_p95"), data.get("left_p95"))
-        if isinstance(val, (int, float)) and np.isfinite(val)
-    ]
-    if xmax_candidates:
-        xmax = float(max(xmax_candidates))
-    else:
-        combined = np.concatenate([arr for arr in (right_samples, left_samples) if arr.size])
-        xmax = float(np.max(combined)) if combined.size else 1.0
-    xmin = 0.0
-    if xmax <= xmin:
+    all_values = np.concatenate([arr for arr in (right_samples, left_samples) if arr.size])
+    xmin = float(np.min(all_values))
+    xmax = float(np.max(all_values))
+    if np.isclose(xmin, xmax):
         xmax = xmin + 1e-6
     xs = np.linspace(xmin, xmax, 400)
 
-    def _kde(samples: np.ndarray) -> Optional[np.ndarray]:
-        if samples.size < 2 or np.allclose(samples, samples[0]):
+    def _compute_kde(samples: np.ndarray) -> Optional[np.ndarray]:
+        if samples.size < 2 or np.all(samples == samples[0]):
             return None
         kde = gaussian_kde(samples)
         density = kde(xs)
-        max_val = float(np.max(density))
+        max_val = density.max()
         return density / max_val if max_val > 0 else None
 
-    density_right = _kde(right_samples)
-    density_left = _kde(left_samples)
-    if density_right is None and density_left is None:
-        print(f"{metric_name}: Unable to compute KDE.")
-        return
+    density_right = _compute_kde(right_samples)
+    density_left = _compute_kde(left_samples)
 
     fig, ax = plt.subplots(figsize=(8, 4))
     if density_right is not None:
@@ -1031,7 +1019,7 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
             return
         try:
             val = float(value)
-        except (TypeError, ValueError):
+        except Exception:
             return
         if np.isfinite(val):
             ax.axvline(val, color=color, linestyle="-", linewidth=2.2)
@@ -1039,16 +1027,13 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
     _draw_user_line(data.get("user_right"), ATTEMPT_COLOR_PINK)
     _draw_user_line(data.get("user_left"), ATTEMPT_COLOR_BLUE)
 
-    max_density = max(
-        float(np.max(density_right)) if density_right is not None else 0.0,
-        float(np.max(density_left)) if density_left is not None else 0.0,
-    )
-    if max_density <= 0:
-        max_density = 1.0
-
-    ax.axhline(0, color="#111111", linewidth=0.8)
+    ax.axhline(0, color="#222222", linewidth=0.8)
     ax.set_xlim(xmin, xmax)
-    ax.set_ylim(-1.05 * max_density, 1.05 * max_density)
+    ymax = max(
+        (density_right.max() if density_right is not None else 0),
+        (density_left.max() if density_left is not None else 0),
+    )
+    ax.set_ylim(-ymax * 1.1, ymax * 1.1 if ymax > 0 else 1.0)
     ax.set_yticks([])
     ax.set_xlabel("Value")
     ax.set_ylabel("")

@@ -26,35 +26,35 @@ from calculate_metrics import batch_evaluate_banzai
 from pose_extract import capture_pose_from_camera, video_to_pose_csv
 from violin_data import VIOLIN_DATA
 
-st.set_page_config(page_title="Motion Score Auto Evaluation App", layout="centered")
+st.set_page_config(page_title="モーションスコア自動評価アプリ", layout="centered")
 
 REFERENCE_VIDEO_PATH = Path("otehon.mp4")
 METRIC_LABELS = {
-    "head_movement": "Head Stability",
-    "shoulder_tilt": "Shoulder Tilt",
-    "torso_tilt": "Torso Lean",
-    "leg_lift": "Leg Lift Height",
-    "foot_sway": "Foot Sway",
-    "arm_sag": "Arm Drop",
-    "banzai_score": "Banzai Posture",
-    "average_score": "Average Score",
+    "head_movement": "頭部の安定性",
+    "shoulder_tilt": "肩の傾き",
+    "torso_tilt": "体幹の傾き",
+    "leg_lift": "脚上げの高さ",
+    "foot_sway": "軸足のブレ",
+    "arm_sag": "腕の保持",
+    "banzai_score": "バンザイ姿勢",
+    "average_score": "平均スコア",
 }
 SCORE_COLORS = {
-    "Banzai Posture": "#1E3A8A",
-    "Head Stability": "#EC4899",
-    "Shoulder Tilt": "#3B82F6",
-    "Torso Lean": "#0EA5E9",
-    "Arm Drop": "#F59E0B",
-    "Foot Sway": "#10B981",
-    "Leg Lift Height": "#8B5CF6",
+    "バンザイ姿勢": "#1E3A8A",
+    "頭部の安定性": "#EC4899",
+    "肩の傾き": "#3B82F6",
+    "体幹の傾き": "#0EA5E9",
+    "腕の保持": "#F59E0B",
+    "軸足のブレ": "#10B981",
+    "脚上げの高さ": "#8B5CF6",
 }
 NEUTRAL_COLOR = "#9CA3AF"
 
 ACTION_LABELS = {
-    "right_leg_1": "Right Leg Lift (Attempt 1)",
-    "right_leg_2": "Right Leg Lift (Attempt 2)",
-    "left_leg_1": "Left Leg Lift (Attempt 1)",
-    "left_leg_2": "Left Leg Lift (Attempt 2)",
+    "right_leg_1": "右脚上げ（1回目）",
+    "right_leg_2": "右脚上げ（2回目）",
+    "left_leg_1": "左脚上げ（1回目）",
+    "left_leg_2": "左脚上げ（2回目）",
 }
 
 LEG_PHASE_ORDER = ["right_leg_1", "left_leg_1", "right_leg_2", "left_leg_2"]
@@ -63,8 +63,8 @@ LEG_PHASE_GROUPS = {
     "left_leg": ["left_leg_1", "left_leg_2"],
 }
 LEG_GROUP_LABELS = {
-    "right_leg": "Right Leg Average",
-    "left_leg": "Left Leg Average",
+    "right_leg": "右脚平均",
+    "left_leg": "左脚平均",
 }
 LEG_PHASE_SHADING = [
     ("right_leg_1", 15, 29, "skyblue"),
@@ -79,27 +79,27 @@ ATTEMPT_FILL_BLUE = "rgba(0,123,255,0.6)"
 AVERAGE_SCORE_COLOR = NEUTRAL_COLOR
 LEG_RADAR_STYLES = {
     "right_leg": [
-        ("right_leg_1", "Attempt 1", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
-        ("right_leg_2", "Attempt 2", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
+        ("right_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
+        ("right_leg_2", "2回目", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
     ],
     "left_leg": [
-        ("left_leg_1", "Attempt 1", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
-        ("left_leg_2", "Attempt 2", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
+        ("left_leg_1", "1回目", ATTEMPT_COLOR_PINK, ATTEMPT_FILL_PINK),
+        ("left_leg_2", "2回目", ATTEMPT_COLOR_BLUE, ATTEMPT_FILL_BLUE),
     ],
 }
 LEG_RADAR_TITLES = {
-    "right_leg": "Right Leg Lifts (Attempts 1 & 2)",
-    "left_leg": "Left Leg Lifts (Attempts 1 & 2)",
+    "right_leg": "右脚上げ（1回目・2回目）",
+    "left_leg": "左脚上げ（1回目・2回目）",
 }
 SCORE_TIER_RULES = [
-    (85, "#2ECC71", "Excellent", "Movement is exceptionally stable."),
-    (70, "#2979FF", "Good", "Great balance throughout the motion."),
-    (55, "#FFB300", "Fair", "Keep refining overall stability."),
-    (0, "#FF4081", "Needs Improvement", "There is still room to improve the form."),
+    (85, "#2ECC71", "とても良い", "非常に安定した動きです。"),
+    (70, "#2979FF", "良い", "動作全体を通してバランスがとれています。"),
+    (55, "#FFB300", "まずまず", "全体の安定性をさらに磨きましょう。"),
+    (0, "#FF4081", "要改善", "フォーム改善の余地があります。"),
 ]
 DEFAULT_SCORE_COLOR = "#FF4081"
-DEFAULT_SCORE_LABEL = "No Score"
-DEFAULT_SCORE_MESSAGE = "Not enough measurement data is available."
+DEFAULT_SCORE_LABEL = "スコアなし"
+DEFAULT_SCORE_MESSAGE = "測定に必要なデータが不足しています。"
 
 
 
@@ -126,45 +126,45 @@ def get_metric_color_by_key(metric_key: str) -> str:
     return get_metric_color_by_title(get_metric_title(metric_key))
 METRIC_FEEDBACK_TEMPLATES = {
     "head_movement": {
-        "high": "Head stays steady with no noticeable wobble.",
-        "mid": "Head movement is minor - keep focusing on stability.",
-        "low": "Focus on reducing head sway during the motion.",
+        "high": "頭がほとんど揺れず安定しています。",
+        "mid": "頭の揺れは小さいですが、引き続き安定性を意識しましょう。",
+        "low": "動作中の頭の揺れを抑えることに集中しましょう。",
     },
     "shoulder_tilt": {
-        "high": "Shoulder line remains level.",
-        "mid": "Shoulders are acceptable but can be steadier.",
-        "low": "Work on keeping both shoulders at the same height.",
+        "high": "肩のラインが水平に保たれています。",
+        "mid": "肩の傾きは許容範囲ですが、さらに安定させましょう。",
+        "low": "両肩を同じ高さに保つよう意識しましょう。",
     },
     "torso_tilt": {
-        "high": "Torso stays upright throughout the motion.",
-        "mid": "Torso is mostly stable - coordinate breathing to reduce sway.",
-        "low": "Upper body is wobbling; keep the core engaged.",
+        "high": "動作全体で体幹がまっすぐ保たれています。",
+        "mid": "体幹は概ね安定しています。呼吸を合わせて揺れを減らしましょう。",
+        "low": "上半身が揺れているので体幹を意識して引き締めましょう。",
     },
     "leg_lift": {
-        "high": "Leg lift height is sufficient.",
-        "mid": "Lifting a bit higher will boost the score.",
-        "low": "Drive the knee higher to emphasize the lift.",
+        "high": "脚上げの高さは十分です。",
+        "mid": "もう少し高く上げるとスコアが伸びます。",
+        "low": "ひざをさらに高く持ち上げて動きを強調しましょう。",
     },
     "foot_sway": {
-        "high": "Supporting foot is steady with a solid axis.",
-        "mid": "Footing is mostly stable - keep the weight placement consistent.",
-        "low": "Grounded foot is swaying; focus on building a stable axis.",
+        "high": "軸足がしっかり安定しています。",
+        "mid": "軸足は概ね安定しています。体重の位置を一定に保ちましょう。",
+        "low": "接地している足が揺れています。軸を安定させましょう。",
     },
     "arm_sag": {
-        "high": "Arms stay lifted throughout the motion.",
-        "mid": "Arms hold up but engage the shoulders to lift more.",
-        "low": "Arms drop easily - keep elbows lifted and active.",
+        "high": "動作全体で腕がしっかり持ち上がっています。",
+        "mid": "腕は保てていますが、肩を意識してもう少し高く上げましょう。",
+        "low": "腕がすぐに下がってしまいます。ひじを持ち上げたまま意識しましょう。",
     },
     "banzai_score": {
-        "high": "Banzai posture is crisp and well held.",
-        "mid": "Banzai posture is mostly good - finish with intent.",
-        "low": "Extend the shoulders and arms fully to hold the pose.",
+        "high": "バンザイ姿勢が明確に保たれています。",
+        "mid": "概ね良いバンザイ姿勢です。最後まで意識してキメましょう。",
+        "low": "肩と腕をしっかり伸ばして姿勢を保ちましょう。",
     },
 }
 DEFAULT_FEEDBACK_TEMPLATE = {
-    "high": "Motion is stable and balanced.",
-    "mid": "Stay mindful of stability as you move.",
-    "low": "Focus on the improvement cues to refine your form.",
+    "high": "動きは安定しバランスが取れています。",
+    "mid": "動作中も常に安定性を意識しましょう。",
+    "low": "改善ポイントを意識してフォームを整えましょう。",
 }
 DETAIL_CARD_METRICS = [
     "head_movement",
@@ -176,13 +176,13 @@ DETAIL_CARD_METRICS = [
     "banzai_score",
 ]
 METRIC_TITLE_OVERRIDES = {
-    "banzai_score": "Banzai Posture",
-    "head_movement": "Head Stability",
-    "shoulder_tilt": "Shoulder Tilt",
-    "torso_tilt": "Torso Lean",
-    "leg_lift": "Leg Lift Height",
-    "foot_sway": "Foot Sway",
-    "arm_sag": "Arm Drop",
+    "banzai_score": "バンザイ姿勢",
+    "head_movement": "頭部の安定性",
+    "shoulder_tilt": "肩の傾き",
+    "torso_tilt": "体幹の傾き",
+    "leg_lift": "脚上げの高さ",
+    "foot_sway": "軸足のブレ",
+    "arm_sag": "腕の保持",
 }
 RESEARCH_UI_CSS = """
 <style>
@@ -334,7 +334,7 @@ def score_to_color(score: float) -> str:
 def select_metric_feedback(metric_key: str, score: float) -> str:
     template = METRIC_FEEDBACK_TEMPLATES.get(metric_key, DEFAULT_FEEDBACK_TEMPLATE)
     if not np.isfinite(score):
-        return "Unable to evaluate due to insufficient data."
+        return "データが不足しているため評価できません。"
     if score >= 75:
         return template.get("high") or DEFAULT_FEEDBACK_TEMPLATE["high"]
     if score >= 50:
@@ -352,11 +352,11 @@ def render_score_block(score: float, label: str, comment_text: str) -> None:
             label_bg, label_border, label_color = "#DBEAFE", "#3B82F6", "#1E40AF"
         else:
             label_bg, label_border, label_color = "#DCFCE7", "#22C55E", "#14532D"
-        score_text = f"{score:.1f} pts"
+        score_text = f"{score:.1f} 点"
     else:
         label_bg, label_border, label_color = "#E5E7EB", "#9CA3AF", "#374151"
         score_text = "--"
-        label = label or "No Score"
+        label = label or "スコアなし"
         comment_text = comment_text or DEFAULT_SCORE_MESSAGE
 
     st.markdown(
@@ -427,34 +427,34 @@ def render_metric_card_html(title: str, score: float, comment: str) -> str:
     image_bytes = fig.to_image(format="png", width=240, height=240, scale=2)
     encoded_image = base64.b64encode(image_bytes).decode("ascii")
     title_html = escape(title)
-    score_text = "-- pts" if not np.isfinite(display_value) else f"{display_value:.1f} pts"
+    score_text = "-- 点" if not np.isfinite(display_value) else f"{display_value:.1f} 点"
     raw_comment = (comment or "").strip()
-    is_banzai = title == "Banzai Posture"
+    is_banzai = title == "バンザイ姿勢"
     if is_banzai:
         detail_lines = [raw_comment] if raw_comment else []
         detail_lines.extend(
             [
-                "Match the angle of both arms and draw the shoulders back for stability.",
-                "Keep the head and torso aligned in a straight line.",
+                "両腕の角度をそろえ、肩を引いて安定させましょう。",
+                "頭と体幹を一直線に保ちましょう。",
             ]
         )
         comment_text = "\n".join(line for line in detail_lines if line)
         if not comment_text:
-            comment_text = "Banzai posture score data is missing."
+            comment_text = "バンザイ姿勢のスコアデータがありません。"
         comment_class = "metric-comment long-comment"
         card_modifier = " long"
         comment_html = escape(comment_text)
     else:
         comment_class = "metric-comment"
         card_modifier = ""
-        comment_text = raw_comment or "Unable to evaluate due to insufficient data."
+        comment_text = raw_comment or "データが不足しているため評価できません。"
         comment_html = escape(comment_text).replace("\n", "<br />")
     return (
         f'<div class="metric-card{card_modifier}">'
         f'\n    <div class="metric-title">{title_html}</div>'
         f'\n    <div class="metric-content">'
         f'\n        <div class="metric-left">'
-        f'\n            <img class="metric-chart" src="data:image/png;base64,{encoded_image}" alt="{title_html} score chart" />'
+        f'\n            <img class="metric-chart" src="data:image/png;base64,{encoded_image}" alt="{title_html} のスコアチャート" />'
         f"\n        </div>"
         f'\n        <div class="metric-right">'
         f'\n            <div class="metric-score">{score_text}</div>'
@@ -528,7 +528,7 @@ def render_reference_video_element(
     Render the reference video with consistent options or show a fallback message.
     """
     if not REFERENCE_VIDEO_PATH.exists():
-        placeholder.info("Reference video not found.")
+        placeholder.info("お手本動画が見つかりません。")
         return
     placeholder.video(
         str(REFERENCE_VIDEO_PATH),
@@ -581,7 +581,7 @@ def crop_to_aspect_ratio(frame: np.ndarray, target_ratio: float = DISPLAY_ASPECT
 def init_session_state() -> None:
     defaults = {
         "page": "start",
-        "source_type": "Video Upload",
+        "source_type": "動画アップロード",
         "measurement_config": None,
         "measurement_ready": False,
         "result_df": None,
@@ -753,7 +753,7 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             continue
         if col.endswith("_score"):
             base = col.replace("_score", "")
-            label = f"{METRIC_LABELS.get(base, base)} (score)"
+            label = f"{METRIC_LABELS.get(base, base)}（スコア）"
             color = get_metric_color_by_key(base)
             fig.add_trace(
                 go.Scatter(
@@ -766,8 +766,8 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             )
     fig.update_layout(
         margin=dict(l=20, r=20, t=30, b=20),
-        xaxis_title="Frame",
-        yaxis_title="Score (0-100)",
+        xaxis_title="フレーム",
+        yaxis_title="スコア（0-100）",
         yaxis=dict(range=[0, 100]),
         template="plotly_white",
     )
@@ -786,7 +786,7 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             y=[None],
             mode="lines",
             line=dict(color="skyblue", width=14),
-            name="Background: Right Leg Lift Phase",
+            name="背景：右脚上げフェーズ",
             legendrank=1000,
         )
     )
@@ -796,7 +796,7 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
             y=[None],
             mode="lines",
             line=dict(color="lightpink", width=14),
-            name="Background: Left Leg Lift Phase",
+            name="背景：左脚上げフェーズ",
             legendrank=1001,
         )
     )
@@ -806,11 +806,11 @@ def build_frame_chart(frame_scores: pd.DataFrame) -> go.Figure:
 def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
     data = violin_data or VIOLIN_DATA.get("head_stability", {})
     st.markdown(
-        '<div class="subsection-title">🎻 Head Stability Distribution (Right = Top, Left = Bottom)</div>',
+        '<div class="subsection-title">🎻 頭部安定性の分布（右＝上・左＝下）</div>',
         unsafe_allow_html=True,
     )
     if not data:
-        st.info("Head stability distribution data is not available.")
+        st.info("頭部安定性の分布データがありません。")
         return
 
     right_samples = np.asarray(data.get("right_population", []), dtype=float)
@@ -819,7 +819,7 @@ def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
     left_samples = left_samples[np.isfinite(left_samples)]
 
     if right_samples.size < 2 or left_samples.size < 2:
-        st.info("Not enough data points to build the violin plot.")
+        st.info("データ点が不足しているためバイオリンプロットを描画できません。")
         return
 
     right_p95 = data.get("right_p95")
@@ -843,8 +843,16 @@ def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
     density_left = _normalized_density(left_samples)
 
     if density_right is None or density_left is None:
-        st.info("Unable to compute KDE for the current head stability data.")
+        st.info("現在の頭部安定性データではKDEを計算できません。")
         return
+
+    import matplotlib.font_manager as fm
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["font.sans-serif"] = [
+        "IPAexGothic",
+        "Noto Sans CJK JP",
+        "Hiragino Sans",
+    ]
 
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.fill_between(xs, 0, density_right, color="#FF69B4", alpha=0.6)
@@ -870,11 +878,11 @@ def render_head_violin_plot(violin_data: Optional[Dict[str, Any]]) -> None:
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(-1.05 * max_density, 1.05 * max_density)
     ax.set_yticks([0.3, -0.3])
-    ax.set_yticklabels(["Right Foot", "Left Foot"])
-    ax.set_xlabel("Head Movement")
+    ax.set_yticklabels(["右足", "左足"])
+    ax.set_xlabel("頭部の動き")
     ax.set_ylabel("")
     ax.axhline(0, color="black", linewidth=0.6)
-    ax.set_title("Head Stability Distribution (Right = Top, Left = Bottom)")
+    ax.set_title("頭部安定性の分布（右脚＝上・左脚＝下）")
     ax.spines["left"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["top"].set_visible(False)
@@ -902,14 +910,19 @@ def _normalized_density(samples: np.ndarray, xs: np.ndarray) -> Optional[np.ndar
     return density / max_val
 
 
-def draw_violin_mirror(metric_name: str, data_dict: Dict[str, Any]) -> None:
+def draw_violin_mirror(
+    metric_name: str,
+    data_dict: Dict[str, Any],
+    user_right: float,
+    user_left: float,
+) -> None:
     if not data_dict:
         return
 
     right_samples = _prepare_population(data_dict.get("right_population", []))
     left_samples = _prepare_population(data_dict.get("left_population", []))
     if right_samples.size == 0 and left_samples.size == 0:
-        st.info(f"No population data available for {metric_name}.")
+        st.info(f"{metric_name} の母集団データがありません。")
         return
 
     combined_values: List[float] = []
@@ -928,7 +941,7 @@ def draw_violin_mirror(metric_name: str, data_dict: Dict[str, Any]) -> None:
     density_right = _normalized_density(right_samples, xs)
     density_left = _normalized_density(left_samples, xs)
     if density_right is None and density_left is None:
-        st.info(f"Unable to compute violin plot for {metric_name}.")
+        st.info(f"{metric_name} のバイオリンプロットを計算できません。")
         return
 
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -956,11 +969,31 @@ def draw_violin_mirror(metric_name: str, data_dict: Dict[str, Any]) -> None:
     )
     if max_density <= 0:
         max_density = 1.0
+    if np.isfinite(user_right):
+        ax.vlines(user_right, ymin=0, ymax=max_density, color=ATTEMPT_COLOR_PINK, linewidth=2.0, zorder=5)
+    if np.isfinite(user_left):
+        ax.vlines(user_left, ymin=0, ymax=-max_density, color=ATTEMPT_COLOR_BLUE, linewidth=2.0, zorder=5)
     ax.axhline(0, color="#111827", linewidth=0.6)
     ax.set_xlim(xmin, xmax)
+    if metric_name == "shoulder_tilt":
+        left_label, right_label = "傾きが小さい", "傾きが大きい"
+    elif metric_name == "torso_tilt":
+        left_label, right_label = "傾きが小さい", "傾きが大きい"
+    elif metric_name == "leg_lift":
+        left_label, right_label = "高い", "低い"
+    elif metric_name == "foot_sway":
+        left_label, right_label = "安定", "不安定"
+    elif metric_name == "arm_sag":
+        left_label, right_label = "傾きが小さい", "傾きが大きい"
+    elif metric_name == "head_movement":
+        left_label, right_label = "安定", "不安定"
+    else:
+        left_label, right_label = f"{xmin:.3f}", f"{xmax:.3f}"
+    ax.set_xticks([xmin, xmax])
+    ax.set_xticklabels([left_label, right_label])
     ax.set_ylim(-1.05 * max_density, 1.05 * max_density)
     ax.set_yticks([])
-    ax.set_xlabel("Value")
+    ax.set_xlabel("値")
     ax.set_ylabel("")
     ax.set_title(metric_name)
     ax.spines["left"].set_visible(False)
@@ -971,13 +1004,22 @@ def draw_violin_mirror(metric_name: str, data_dict: Dict[str, Any]) -> None:
     plt.close(fig)
 
 
-def draw_all_violin_plots(violin_dataset: Dict[str, Dict[str, Any]]) -> None:
+def draw_all_violin_plots(
+    violin_dataset: Dict[str, Dict[str, Any]],
+    summary_row: pd.Series,
+) -> None:
     if not violin_dataset:
-        st.info("Population distributions for violin plots are not available.")
+        st.info("バイオリンプロット用の母集団データがありません。")
         return
-    st.markdown('<div class="subsection-title">🎯 Metric Distribution Violin Plots</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subsection-title">🎯 指標の分布（バイオリンプロット）</div>', unsafe_allow_html=True)
     for metric_name, metric_data in violin_dataset.items():
-        draw_violin_mirror(metric_name, metric_data)
+        if summary_row is None:
+            user_right = np.nan
+            user_left = np.nan
+        else:
+            user_right = float(summary_row.get(f"{metric_name}_right", np.nan))
+            user_left = float(summary_row.get(f"{metric_name}_left", np.nan))
+        draw_violin_mirror(metric_name, metric_data, user_right, user_left)
 
 
 def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
@@ -988,7 +1030,7 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
     left_samples = left_samples[np.isfinite(left_samples)]
 
     if right_samples.size == 0 and left_samples.size == 0:
-        print(f"{metric_name}: No valid data.")
+        print(f"{metric_name}: 有効なデータがありません。")
         return
 
     xmax_candidates = [
@@ -1017,7 +1059,7 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
     density_right = _kde(right_samples)
     density_left = _kde(left_samples)
     if density_right is None and density_left is None:
-        print(f"{metric_name}: Unable to compute KDE.")
+        print(f"{metric_name}: KDE を計算できません。")
         return
 
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -1050,7 +1092,7 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
     ax.set_xlim(xmin, xmax)
     ax.set_ylim(-1.05 * max_density, 1.05 * max_density)
     ax.set_yticks([])
-    ax.set_xlabel("Value")
+    ax.set_xlabel("値")
     ax.set_ylabel("")
     ax.set_title(metric_name)
     ax.spines["top"].set_visible(False)
@@ -1061,18 +1103,18 @@ def plot_violin(metric_name: str, data: Dict[str, Any]) -> None:
 
 
 def render_metric_feedback_cards(result_row: pd.Series, violin_data: Optional[Dict[str, Any]] = None) -> None:
-    st.markdown('<div class="section-title">🧩 Detailed Metrics</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🧩 詳細指標</div>', unsafe_allow_html=True)
     card_order = [
-        ("banzai_score", "Banzai Posture"),
-        ("head_movement", "Head Stability"),
-        ("shoulder_tilt", "Shoulder Tilt"),
-        ("torso_tilt", "Torso Lean"),
-        ("arm_sag", "Arm Drop"),
-        ("foot_sway", "Foot Sway"),
-        ("leg_lift", "Leg Lift Height"),
+        ("banzai_score", "バンザイ姿勢"),
+        ("head_movement", "頭部の安定性"),
+        ("shoulder_tilt", "肩の傾き"),
+        ("torso_tilt", "体幹の傾き"),
+        ("arm_sag", "腕の保持"),
+        ("foot_sway", "軸足のブレ"),
+        ("leg_lift", "脚上げの高さ"),
     ]
     if not any(f"{key}_score" in result_row.index for key, _ in card_order):
-        st.info("Metric scores have not been calculated yet.")
+        st.info("指標スコアがまだ計算されていません。")
         return
     def card_html(metric_key: str, title: str) -> str:
         score_val = float(result_row.get(f"{metric_key}_score", np.nan))
@@ -1098,17 +1140,17 @@ def render_metric_feedback_cards(result_row: pd.Series, violin_data: Optional[Di
     </div>
 </div>
 """.format(
-        banzai=card_html("banzai_score", "Banzai Posture"),
-        head=card_html("head_movement", "Head Stability"),
-        shoulder=card_html("shoulder_tilt", "Shoulder Tilt"),
-        torso=card_html("torso_tilt", "Torso Lean"),
-        arm=card_html("arm_sag", "Arm Drop"),
-        foot=card_html("foot_sway", "Foot Sway"),
-        leg=card_html("leg_lift", "Leg Lift Height"),
+        banzai=card_html("banzai_score", "バンザイ姿勢"),
+        head=card_html("head_movement", "頭部の安定性"),
+        shoulder=card_html("shoulder_tilt", "肩の傾き"),
+        torso=card_html("torso_tilt", "体幹の傾き"),
+        arm=card_html("arm_sag", "腕の保持"),
+        foot=card_html("foot_sway", "軸足のブレ"),
+        leg=card_html("leg_lift", "脚上げの高さ"),
     )
     st.markdown(cards_html, unsafe_allow_html=True)
     render_head_violin_plot(violin_data)
-    draw_all_violin_plots(VIOLIN_DATA)
+    draw_all_violin_plots(VIOLIN_DATA, result_row)
 
 
 def extract_pose_from_video(video_path: str, resize_scale: float, frame_stride: int) -> pd.DataFrame:
@@ -1155,7 +1197,7 @@ def run_measurement(config: Dict) -> Dict:
     elif mode == "csv":
         pose_df = preprocess_landmarks(config["dataframe"])
     else:
-        raise ValueError(f"Unsupported mode: {mode}")
+        raise ValueError(f"未対応のモード: {mode}")
 
     frame_metrics_df = calculate_metrics_by_frame(pose_df)
     result_df, frame_scores_df = score_data(
@@ -1183,8 +1225,8 @@ def run_measurement(config: Dict) -> Dict:
 
 
 def render_start_view() -> None:
-    st.title("💪 Motion Score Auto Evaluation App")
-    st.markdown("Press the start button to begin a new measurement.")
+    st.title("💪 モーションスコア自動評価アプリ")
+    st.markdown("新しい測定を始めるにはスタートボタンを押してください。")
 
     if not st.session_state.get("warmup_camera_initialized", False):
         camera_index = 0
@@ -1192,7 +1234,7 @@ def render_start_view() -> None:
         try:
             cap = cv2.VideoCapture(camera_index)
             if not cap.isOpened():
-                raise RuntimeError("Failed to initialize the camera.")
+                raise RuntimeError("カメラを初期化できませんでした。")
             for _ in range(10):
                 ok, _ = cap.read()
                 if not ok:
@@ -1200,19 +1242,19 @@ def render_start_view() -> None:
             st.session_state["warmup_camera"] = cap
             st.session_state["warmup_camera_initialized"] = True
             st.session_state["camera_warmed"] = True
-            st.info("📸 Camera warm-up completed.")
+            st.info("📸 カメラのウォームアップが完了しました。")
         except Exception as exc:
             if cap is not None:
                 cap.release()
             release_warmup_camera()
-            st.warning(f"Camera warm-up failed: {exc}")
+            st.warning(f"カメラのウォームアップに失敗しました：{exc}")
     elif st.session_state.get("camera_warmed"):
-        st.caption("📸 Camera is ready.")
+        st.caption("📸 カメラの準備ができています。")
 
     st.session_state["source_type"] = st.radio(
-        "Select input source",
-        ["Video Upload", "Webcam"],
-        index=0 if st.session_state["source_type"] == "Video Upload" else 1,
+        "入力ソースを選択",
+        ["動画アップロード", "Webカメラ"],
+        index=0 if st.session_state["source_type"] == "動画アップロード" else 1,
         horizontal=True,
     )
 
@@ -1222,43 +1264,43 @@ def render_start_view() -> None:
     capture_seconds = 8
     target_fps = 15
 
-    if st.session_state["source_type"] == "Video Upload":
-        video_file = st.file_uploader("Select a video file (mp4 / mov / avi / mkv)", type=["mp4", "mov", "avi", "mkv"])
+    if st.session_state["source_type"] == "動画アップロード":
+        video_file = st.file_uploader("動画ファイルを選択（mp4 / mov / avi / mkv）", type=["mp4", "mov", "avi", "mkv"])
         col1, col2 = st.columns(2)
-        resize_scale = col1.slider("Resize scale (lighter processing)", 0.3, 1.0, 0.7, 0.1)
-        frame_stride = col2.slider("Frame stride", 1, 5, 1, 1)
+        resize_scale = col1.slider("リサイズ倍率（処理を軽くする）", 0.3, 1.0, 0.7, 0.1)
+        frame_stride = col2.slider("フレーム間引き", 1, 5, 1, 1)
     else:
         col1, col2, col3 = st.columns(3)
         default_capture = max(3, int(round(REFERENCE_DURATION_SECONDS)))
         slider_max = max(default_capture, 20)
-        capture_seconds = col1.slider("Capture duration (seconds)", 3, slider_max, default_capture)
-        frame_stride = col2.slider("Frame stride", 1, 5, 1, 1)
-        resize_scale = col3.slider("Resize scale (lighter processing)", 0.4, 1.0, 0.7, 0.1)
+        capture_seconds = col1.slider("撮影時間（秒）", 3, slider_max, default_capture)
+        frame_stride = col2.slider("フレーム間引き", 1, 5, 1, 1)
+        resize_scale = col3.slider("リサイズ倍率（処理を軽くする）", 0.4, 1.0, 0.7, 0.1)
 
     csv_debug_df = None
     csv_debug_file = None
-    with st.expander("🔧 Expert Mode (CSV Debug)"):
-        csv_debug_file = st.file_uploader("Upload skeleton CSV directly", type=["csv"], key="csv_debug_uploader")
+    with st.expander("🔧 エキスパートモード（CSVデバッグ）"):
+        csv_debug_file = st.file_uploader("骨格CSVを直接アップロード", type=["csv"], key="csv_debug_uploader")
         if csv_debug_file is not None:
             try:
                 csv_debug_file.seek(0)
                 csv_debug_df = pd.read_csv(csv_debug_file)
-                st.success("CSV loaded successfully.")
+                st.success("CSVを読み込みました。")
             except Exception as exc:
-                st.error(f"Failed to load CSV: {exc}")
+                st.error(f"CSVを読み込めませんでした：{exc}")
                 csv_debug_df = None
 
     start_disabled = bool(st.session_state.get("measurement_ready")) or st.session_state.get("countdown_active", False)
-    if st.button("🟢 Start Measurement", type="primary", disabled=start_disabled):
+    if st.button("🟢 測定を開始", type="primary", disabled=start_disabled):
         if csv_debug_df is not None:
             config = {
                 "mode": "csv",
                 "dataframe": csv_debug_df,
                 "label": csv_debug_file.name if csv_debug_file else "csv_input",
             }
-        elif st.session_state["source_type"] == "Video Upload":
+        elif st.session_state["source_type"] == "動画アップロード":
             if video_file is None:
-                st.warning("Please select a video file.")
+                st.warning("動画ファイルを選択してください。")
                 return
             tmp_video = tempfile.NamedTemporaryFile(delete=False, suffix=Path(video_file.name).suffix)
             tmp_video.write(video_file.getbuffer())
@@ -1300,10 +1342,10 @@ def render_measuring_view() -> None:
         return
 
     if st.session_state.get("countdown_active"):
-        st.header("🎬 Preparing Measurement...")
+        st.header("🎬 測定の準備中...")
         message_placeholder = st.empty()
         countdown_placeholder = st.empty()
-        message_placeholder.info("🎬 Please wait until the measurement begins...")
+        message_placeholder.info("🎬 測定が始まるまでお待ちください...")
         duration = int(st.session_state.get("countdown_duration", COUNTDOWN_SECONDS) or COUNTDOWN_SECONDS)
         for value in range(duration, 0, -1):
             countdown_placeholder.markdown(
@@ -1318,7 +1360,7 @@ def render_measuring_view() -> None:
         countdown_placeholder.markdown(
             """
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:70vh;">
-                <div style="font-size:6rem; font-weight:700; color:#43AA8B; line-height:1;">Start!</div>
+                <div style="font-size:6rem; font-weight:700; color:#43AA8B; line-height:1;">スタート！</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1329,31 +1371,31 @@ def render_measuring_view() -> None:
         st.rerun()
         return
 
-    st.header("🏃‍♀️ Measuring...")
+    st.header("🏃‍♀️ 測定中...")
     col1, col2 = st.columns([1, 1])
     reference_video_placeholder = None
     with col1:
-        st.subheader("Reference")
+        st.subheader("参考映像")
         reference_video_placeholder = st.empty()
         if not st.session_state.get("measurement_ready"):
-            reference_video_placeholder.info("The reference video will play after the countdown finishes.")
+            reference_video_placeholder.info("カウントダウンが終わるとお手本動画が再生されます。")
     live_placeholder = None
     with col2:
-        st.subheader("Your Movement")
+        st.subheader("あなたの動き")
         if config["mode"] == "video":
             st.video(config["video_path"])
         elif config["mode"] == "webcam":
             live_placeholder = st.empty()
-            live_placeholder.info("Initializing webcam feed...")
+            live_placeholder.info("Webカメラを初期化しています...")
         else:
-            st.info("Analyzing CSV data...")
+            st.info("CSVデータを解析中です...")
 
     phase_placeholder = st.empty()
     if config["mode"] != "webcam":
-        phase_placeholder.markdown("**🏃‍♀️ Measuring: Processing...**")
+        phase_placeholder.markdown("**🏃‍♀️ 測定中：処理しています...**")
 
-    st.markdown("### 🏃‍♀️ Measurement in progress...")
-    st.caption("You will be redirected to the results screen once analysis is complete.")
+    st.markdown("### 🏃‍♀️ 測定を実行しています...")
+    st.caption("解析が完了すると結果画面へ移動します。")
 
     config_for_run = dict(config)
     if config["mode"] == "webcam":
@@ -1372,11 +1414,11 @@ def render_measuring_view() -> None:
             live_placeholder.image(
                 resized,
                 channels="RGB",
-                caption=f"Frame {frame_idx}",
+                caption=f"フレーム {frame_idx}",
             )
             action_key = classify_action(frame_idx)
-            phase_label = ACTION_LABELS.get(action_key, "In motion")
-            phase_placeholder.markdown(f"**🏃‍♀️ Measuring: {phase_label}**")
+            phase_label = ACTION_LABELS.get(action_key, "動作中")
+            phase_placeholder.markdown(f"**🏃‍♀️ 測定中：{phase_label}**")
 
         config_for_run["frame_callback"] = frame_callback
 
@@ -1391,7 +1433,7 @@ def render_measuring_view() -> None:
     if measurement_ready:
         measurement_result: Dict = {}
         try:
-            with st.spinner("Analyzing..."):
+            with st.spinner("解析中です..."):
                 measurement_result = run_measurement(config_for_run)
         finally:
             st.session_state["measurement_ready"] = False
@@ -1411,8 +1453,8 @@ def render_measuring_view() -> None:
 
 
 def render_waiting_view() -> None:
-    st.header("🧠 Analyzing...")
-    st.info("Results will appear shortly.")
+    st.header("🧠 解析中...")
+    st.info("まもなく結果が表示されます。")
     wait_until = st.session_state.get("wait_until")
     if wait_until is None or time.time() >= wait_until:
         st.session_state["page"] = "result"
@@ -1432,21 +1474,21 @@ def render_banzai_test_view():
     import streamlit as st
     from pathlib import Path
 
-    st.header("🕺 Banzai Evaluation Test")
-    st.markdown("Run Banzai scoring for all CSVs in a selected folder.")
+    st.header("🕺 バンザイ評価テスト")
+    st.markdown("選択したフォルダー内の全CSVでバンザイスコアを計算します。")
 
-    folder = st.text_input("Enter folder path", "data_banzai_landmarks")
-    if st.button("Run Banzai Evaluation"):
+    folder = st.text_input("フォルダーパスを入力", "data_banzai_landmarks")
+    if st.button("バンザイ評価を実行"):
         folder_path = Path(folder)
         if not folder_path.exists():
-            st.error(f"❌ Folder not found: {folder}")
+            st.error(f"❌ フォルダーが見つかりません：{folder}")
         else:
-            with st.spinner("Evaluating all CSVs..."):
+            with st.spinner("すべてのCSVを評価中..."):
                 df = batch_evaluate_banzai(folder_path)
                 if df.empty:
-                    st.warning("No valid CSV files found.")
+                    st.warning("有効なCSVファイルが見つかりません。")
                 else:
-                    st.success("✅ Evaluation complete!")
+                    st.success("✅ 評価が完了しました！")
                     st.dataframe(df)
 
 
@@ -1461,7 +1503,7 @@ def render_result_view() -> None:
 
     summary_table = build_summary_display_df(result_df)
     if summary_table is None or summary_table.empty:
-        st.info("No score data was found. Please run another measurement.")
+        st.info("スコアデータが見つかりません。再度測定してください。")
         return
 
     summary_row = summary_table.iloc[0]
@@ -1471,7 +1513,7 @@ def render_result_view() -> None:
     render_score_block(total_score, tier_label, tier_message)
 
     # === RADAR CHART ===
-    st.markdown('<div class="section-title">📊 Motion Profile</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📊 モーションプロフィール</div>', unsafe_allow_html=True)
     english_keys = SCORE_COLUMNS
     metric_labels = [METRIC_LABELS.get(k, k) for k in english_keys]
     values = [
@@ -1528,108 +1570,113 @@ def render_result_view() -> None:
     render_metric_feedback_cards(summary_row, st.session_state.get("violin_data"))
 
     # === ADDITIONAL GRAPHS ===
-    st.markdown('<div class="section-title">📈 Additional Charts</div>', unsafe_allow_html=True)
-    if frame_scores_df is not None and not frame_scores_df.empty:
-        st.markdown('<div class="subsection-title">⏱ Frame-by-Frame Trends</div>', unsafe_allow_html=True)
-        avg_frame_score = (
-            float(frame_scores_df["average_score"].mean(skipna=True))
-            if "average_score" in frame_scores_df
-            else np.nan
-        )
-        if np.isfinite(avg_frame_score):
-            st.metric("Average Frame Score (Key Metric)", f"{avg_frame_score:.1f} pts")
-        st.plotly_chart(build_frame_chart(frame_scores_df), width="stretch")
-        with st.expander("Show frame-by-frame scores"):
-            st.dataframe(frame_scores_df)
+    SHOW_ADDITIONAL_CHARTS = False
+    if SHOW_ADDITIONAL_CHARTS:
+        st.markdown('<div class="section-title">📈 追加のチャート</div>', unsafe_allow_html=True)
+        if frame_scores_df is not None and not frame_scores_df.empty:
+            st.markdown('<div class="subsection-title">⏱ フレームごとの推移</div>', unsafe_allow_html=True)
+            avg_frame_score = (
+                float(frame_scores_df["average_score"].mean(skipna=True))
+                if "average_score" in frame_scores_df
+                else np.nan
+            )
+            if np.isfinite(avg_frame_score):
+                st.metric("フレーム平均スコア（主要指標）", f"{avg_frame_score:.1f} 点")
+            st.plotly_chart(build_frame_chart(frame_scores_df), width="stretch")
+            with st.expander("フレームごとのスコアを表示"):
+                st.dataframe(frame_scores_df)
 
-        if "action" in frame_scores_df.columns:
-            score_cols = [col for col in frame_scores_df.columns if col.endswith("_score")]
-            include_avg = "average_score" in frame_scores_df.columns
-            if score_cols:
-                group_cols = score_cols + (["average_score"] if include_avg else [])
-                action_means = frame_scores_df.groupby("action")[group_cols].mean().round(1)
-                action_means = action_means.loc[action_means.index.isin(ACTION_LABELS.keys())]
-                if not action_means.empty:
-                    ordered = [phase for phase in LEG_PHASE_ORDER if phase in action_means.index]
-                    remainder = [idx for idx in action_means.index if idx not in ordered]
-                    action_means = action_means.reindex(ordered + remainder)
+            if "action" in frame_scores_df.columns:
+                score_cols = [col for col in frame_scores_df.columns if col.endswith("_score")]
+                include_avg = "average_score" in frame_scores_df.columns
+                if score_cols:
+                    group_cols = score_cols + (["average_score"] if include_avg else [])
+                    action_means = frame_scores_df.groupby("action")[group_cols].mean().round(1)
+                    action_means = action_means.loc[action_means.index.isin(ACTION_LABELS.keys())]
+                    if not action_means.empty:
+                        ordered = [phase for phase in LEG_PHASE_ORDER if phase in action_means.index]
+                        remainder = [idx for idx in action_means.index if idx not in ordered]
+                        action_means = action_means.reindex(ordered + remainder)
 
-                    column_map: Dict[str, str] = {}
-                    display_df = action_means.rename(index=lambda k: ACTION_LABELS.get(k, k))
-                    for col_name in display_df.columns:
-                        if col_name.endswith("_score"):
-                            metric_key = col_name.replace("_score", "")
-                            column_map[col_name] = f"{METRIC_LABELS.get(metric_key, metric_key)}(score)"
-                        elif col_name == "average_score":
-                            column_map[col_name] = "Average Score"
-                    if column_map:
-                        display_df = display_df.rename(columns=column_map)
-                    display_df = display_df.loc[:, ~display_df.columns.duplicated()]
-                    # Removed bar chart for action phase average scores
+                        column_map: Dict[str, str] = {}
+                        display_df = action_means.rename(index=lambda k: ACTION_LABELS.get(k, k))
+                        for col_name in display_df.columns:
+                            if col_name.endswith("_score"):
+                                metric_key = col_name.replace("_score", "")
+                                column_map[col_name] = f"{METRIC_LABELS.get(metric_key, metric_key)}（スコア）"
+                            elif col_name == "average_score":
+                                column_map[col_name] = "平均スコア"
+                        if column_map:
+                            display_df = display_df.rename(columns=column_map)
+                        display_df = display_df.loc[:, ~display_df.columns.duplicated()]
+                        # Removed bar chart for action phase average scores
 
-                    def build_leg_radar(group_key: str) -> Optional[go.Figure]:
-                        styles = LEG_RADAR_STYLES.get(group_key, [])
-                        metric_keys = [
-                            metric
-                            for metric in SCORE_COLUMNS
-                            if metric != "banzai_score" and f"{metric}_score" in action_means.columns
-                        ]
-                        if not metric_keys:
-                            return None
-                        metric_labels_group = [METRIC_LABELS.get(metric, metric) for metric in metric_keys]
-                        if not metric_labels_group:
-                            return None
-                        labels_closed_group = metric_labels_group + [metric_labels_group[0]]
-                        fig_action = go.Figure()
-                        for phase_key, suffix, line_color, fill_color in styles:
-                            if phase_key not in action_means.index:
-                                continue
-                            per_action_values = []
-                            for metric in metric_keys:
-                                column_name = f"{metric}_score"
-                                if column_name in action_means.columns:
-                                    per_action_values.append(float(action_means.loc[phase_key, column_name]))
-                            if not per_action_values:
-                                per_action_values = [0.0] * len(metric_keys)
-                            if not per_action_values:
-                                continue
-                            values_closed = per_action_values + per_action_values[:1]
-                            fig_action.add_trace(
-                                go.Scatterpolar(
-                                    r=values_closed,
-                                    theta=labels_closed_group,
-                                    fill="toself",
-                                    name=f"{ACTION_LABELS.get(phase_key, phase_key)} {suffix}",
-                                    line_color=line_color,
-                                    fillcolor=fill_color,
-                                    opacity=1.0,
+                        def build_leg_radar(group_key: str) -> Optional[go.Figure]:
+                            styles = LEG_RADAR_STYLES.get(group_key, [])
+                            metric_keys = [
+                                metric
+                                for metric in SCORE_COLUMNS
+                                if metric != "banzai_score" and f"{metric}_score" in action_means.columns
+                            ]
+                            if not metric_keys:
+                                return None
+                            metric_labels_group = [METRIC_LABELS.get(metric, metric) for metric in metric_keys]
+                            if not metric_labels_group:
+                                return None
+                            labels_closed_group = metric_labels_group + [metric_labels_group[0]]
+                            fig_action = go.Figure()
+                            for phase_key, suffix, line_color, fill_color in styles:
+                                if phase_key not in action_means.index:
+                                    continue
+                                per_action_values = []
+                                for metric in metric_keys:
+                                    column_name = f"{metric}_score"
+                                    if column_name in action_means.columns:
+                                        per_action_values.append(float(action_means.loc[phase_key, column_name]))
+                                if not per_action_values:
+                                    per_action_values = [0.0] * len(metric_keys)
+                                if not per_action_values:
+                                    continue
+                                values_closed = per_action_values + per_action_values[:1]
+                                legend_label = ACTION_LABELS.get(phase_key, phase_key)
+                                if suffix and suffix not in legend_label:
+                                    legend_label = f"{legend_label} {suffix}"
+                                fig_action.add_trace(
+                                    go.Scatterpolar(
+                                        r=values_closed,
+                                        theta=labels_closed_group,
+                                        fill="toself",
+                                        name=legend_label,
+                                        line_color=line_color,
+                                        fillcolor=fill_color,
+                                        opacity=1.0,
+                                    )
                                 )
+                            if not fig_action.data:
+                                return None
+                            fig_action.update_layout(
+                                polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                                showlegend=True,
+                                legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
+                                margin=dict(l=20, r=20, t=60, b=60),
+                                height=360,
                             )
-                        if not fig_action.data:
-                            return None
-                        fig_action.update_layout(
-                            polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                            showlegend=True,
-                            legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-                            margin=dict(l=20, r=20, t=60, b=60),
-                            height=360,
-                        )
-                        return fig_action
+                            return fig_action
 
-                    leg_radars = []
-                    for group_key in ["right_leg", "left_leg"]:
-                        radar_fig = build_leg_radar(group_key)
-                        if radar_fig is not None:
-                            leg_radars.append((group_key, radar_fig))
-                    if leg_radars:
-                        st.markdown('<div class="subsection-title">🦵 Left vs Right Leg Average Scores</div>', unsafe_allow_html=True)
-                        cols = st.columns(len(leg_radars))
-                        for col_slot, (group_key, radar_fig) in zip(cols, leg_radars):
-                            with col_slot:
-                                st.subheader(LEG_RADAR_TITLES.get(group_key, group_key))
-                                st.plotly_chart(radar_fig, width="stretch")
+                        leg_radars = []
+                        for group_key in ["right_leg", "left_leg"]:
+                            radar_fig = build_leg_radar(group_key)
+                            if radar_fig is not None:
+                                leg_radars.append((group_key, radar_fig))
+                        if leg_radars:
+                            st.markdown('<div class="subsection-title">🦵 左右脚の平均スコア比較</div>', unsafe_allow_html=True)
+                            cols = st.columns(len(leg_radars))
+                            for col_slot, (group_key, radar_fig) in zip(cols, leg_radars):
+                                with col_slot:
+                                    st.subheader(LEG_RADAR_TITLES.get(group_key, group_key))
+                                    st.plotly_chart(radar_fig, width="stretch")
 
-    with st.expander("Show detailed score table"):
+    with st.expander("詳細スコア表を表示"):
         st.dataframe(summary_table)
 
     st.markdown("---")
@@ -1637,20 +1684,20 @@ def render_result_view() -> None:
     with col1:
         if st.session_state.get("frame_scores_csv") is not None:
             st.download_button(
-                "💾 Save frame scores as CSV",
+                "💾 フレームスコアをCSVで保存",
                 data=st.session_state["frame_scores_csv"],
                 file_name="frame_scores.csv",
                 mime="text/csv",
             )
         if st.session_state.get("pose_csv_bytes") is not None:
             st.download_button(
-                "💾 Save pose data as CSV",
+                "💾 ポーズデータをCSVで保存",
                 data=st.session_state["pose_csv_bytes"],
                 file_name="pose_landmarks.csv",
                 mime="text/csv",
             )
     with col2:
-        st.button("🔁 Measure Again", on_click=reset_measurement_state)
+        st.button("🔁 もう一度測定する", on_click=reset_measurement_state)
 
 
 def main() -> None:

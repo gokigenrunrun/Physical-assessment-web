@@ -1,7 +1,7 @@
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import base64
 import matplotlib.pyplot as plt
@@ -26,7 +26,15 @@ from calculate_metrics import batch_evaluate_banzai
 from pose_extract import capture_pose_from_camera, video_to_pose_csv
 from violin_data import VIOLIN_DATA
 
-st.set_page_config(page_title="モーションスコア自動評価アプリ", layout="centered")
+plt.rcParams["font.family"] = [
+    "Hiragino Sans",
+    "IPAexGothic",
+    "Noto Sans CJK JP",
+    "Yu Gothic",
+    "sans-serif",
+]
+
+st.set_page_config(page_title="運動機能評価支援システム", layout="centered")
 
 REFERENCE_VIDEO_PATH = Path("otehon.mp4")
 METRIC_LABELS = {
@@ -910,6 +918,36 @@ def _normalized_density(samples: np.ndarray, xs: np.ndarray) -> Optional[np.ndar
     return density / max_val
 
 
+RIGHT_LEG_PHASES = ["right_leg_1", "right_leg_2"]
+LEFT_LEG_PHASES = ["left_leg_1", "left_leg_2"]
+
+
+def compute_side_metric_series(
+    frame_scores_df: Optional[pd.DataFrame],
+    metric_names: Iterable[str],
+) -> pd.Series:
+    if frame_scores_df is None or frame_scores_df.empty or "action" not in frame_scores_df.columns:
+        return pd.Series(dtype=float)
+
+    side_map = {
+        "right": RIGHT_LEG_PHASES,
+        "left": LEFT_LEG_PHASES,
+    }
+    data: Dict[str, float] = {}
+    for metric in metric_names:
+        if metric not in frame_scores_df.columns:
+            continue
+        for side_key, actions in side_map.items():
+            subset = frame_scores_df[frame_scores_df["action"].isin(actions)]
+            if subset.empty:
+                value = np.nan
+            else:
+                metric_series = subset[metric]
+                value = float(metric_series.mean(skipna=True)) if metric_series.notna().any() else np.nan
+            data[f"{metric}_{side_key}"] = value
+    return pd.Series(data, dtype=float)
+
+
 def draw_violin_mirror(
     metric_name: str,
     data_dict: Dict[str, Any],
@@ -995,7 +1033,7 @@ def draw_violin_mirror(
     ax.set_yticks([])
     ax.set_xlabel("値")
     ax.set_ylabel("")
-    ax.set_title(metric_name)
+    ax.set_title(METRIC_LABELS.get(metric_name, metric_name))
     ax.spines["left"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["top"].set_visible(False)
@@ -1013,6 +1051,8 @@ def draw_all_violin_plots(
         return
     st.markdown('<div class="subsection-title">🎯 指標の分布（バイオリンプロット）</div>', unsafe_allow_html=True)
     for metric_name, metric_data in violin_dataset.items():
+        if metric_name == "head_stability":
+            continue
         if summary_row is None:
             user_right = np.nan
             user_left = np.nan
@@ -1149,7 +1189,6 @@ def render_metric_feedback_cards(result_row: pd.Series, violin_data: Optional[Di
         leg=card_html("leg_lift", "脚上げの高さ"),
     )
     st.markdown(cards_html, unsafe_allow_html=True)
-    render_head_violin_plot(violin_data)
     draw_all_violin_plots(VIOLIN_DATA, result_row)
 
 
@@ -1191,6 +1230,7 @@ def run_measurement(config: Dict) -> Dict:
             target_fps=config["target_fps"],
             frame_callback=frame_callback,
             return_start_timestamp=True,
+            model_asset_path="pose_landmarker_lite.task",
         )
         raw_df, start_ts = raw_df
         pose_df = preprocess_landmarks(raw_df)
@@ -1225,7 +1265,7 @@ def run_measurement(config: Dict) -> Dict:
 
 
 def render_start_view() -> None:
-    st.title("💪 モーションスコア自動評価アプリ")
+    st.title("💪 運動機能評価支援システム")
     st.markdown("新しい測定を始めるにはスタートボタンを押してください。")
 
     if not st.session_state.get("warmup_camera_initialized", False):
@@ -1506,7 +1546,14 @@ def render_result_view() -> None:
         st.info("スコアデータが見つかりません。再度測定してください。")
         return
 
-    summary_row = summary_table.iloc[0]
+    summary_row = summary_table.iloc[0].copy()
+    side_metric_series = compute_side_metric_series(
+        st.session_state.get("frame_scores_df"),
+        VIOLIN_DATA.keys(),
+    )
+    if not side_metric_series.empty:
+        for key, value in side_metric_series.items():
+            summary_row[key] = value
     total_score = float(summary_row.get("total_score", np.nan))
     tier_color, tier_label, tier_message = describe_total_score(total_score)
     # === HEADER: TOTAL SCORE ===

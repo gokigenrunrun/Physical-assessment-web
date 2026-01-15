@@ -1,10 +1,9 @@
 streamlit
-pandas
 numpy
-plotly
-matplotlib
 scipy
+pandas
+matplotlib
+plotly
 kaleido
-
-mediapipe==0.10.14
-opencv-python-headless==4.10.0.84
+opencv-python
+mediapipe==0.10.31

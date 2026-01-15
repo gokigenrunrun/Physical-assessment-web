@@ -4,37 +4,72 @@ from pathlib import Path
 from typing import Callable, Generator, Iterable, Optional, Tuple
 
 import cv2
-import mediapipe as mp
 import numpy as np
 import pandas as pd
 import time
-from mediapipe.framework.formats import landmark_pb2
 
-# 軽量のSolutions API
-mp_pose = mp.solutions.pose
-mp_drawing = mp.solutions.drawing_utils
-mp_styles = mp.solutions.drawing_styles
+import mediapipe as mp
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.core import base_options
+
 
 LANDMARK_HEADER = ["frame", "landmark_index", "x", "y", "z", "visibility"]
+DEFAULT_MODEL_CANDIDATES = (
+    "pose_landmarker_heavy.task",
+    "pose_landmarker_full.task",
+    "pose_landmarker_lite.task",
+)
+
+
+def _resolve_model_path(model_asset_path: Optional[str] = None) -> str:
+    """Looks for a bundled PoseLandmarker model when no path is provided."""
+    if model_asset_path:
+        return model_asset_path
+
+    mp_root = Path(mp.__file__).resolve().parent
+    for candidate in DEFAULT_MODEL_CANDIDATES:
+        bundled = mp_root / "modules" / "pose_landmark" / candidate
+        if bundled.exists():
+            return str(bundled)
+
+    raise FileNotFoundError(
+        "PoseLandmarker model (.task) not found. Specify model_asset_path explicitly."
+    )
+
+
+def _create_pose_landmarker(model_asset_path: Optional[str] = None) -> vision.PoseLandmarker:
+    options = vision.PoseLandmarkerOptions(
+        base_options=base_options.BaseOptions(model_asset_path=_resolve_model_path(model_asset_path)),
+        running_mode=vision.RunningMode.VIDEO,
+        min_pose_detection_confidence=0.5,
+        min_pose_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+        output_segmentation_masks=False,
+    )
+    return vision.PoseLandmarker.create_from_options(options)
 
 
 def draw_pose_landmarks(
     frame_bgr: np.ndarray,
-    pose_landmarks: Optional[landmark_pb2.NormalizedLandmarkList],
+    pose_landmarks: Optional[list],
 ) -> np.ndarray:
     """
-    MediaPipeのランドマークをフレームに重畳して返す。
+    Tasks API の pose landmarks を OpenCV で描画する
     """
     if pose_landmarks is None:
         return frame_bgr
 
     annotated = frame_bgr.copy()
-    mp_drawing.draw_landmarks(
-        annotated,
-        pose_landmarks,
-        mp_pose.POSE_CONNECTIONS,
-        landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style(),
-    )
+    h, w, _ = annotated.shape
+
+    # 各関節を描画
+    for lm in pose_landmarks:
+        cx, cy = int(lm.x * w), int(lm.y * h)
+        cv2.circle(annotated, (cx, cy), 4, (0, 255, 0), -1)
+
+    # （任意）骨格の接続線も描きたい場合はここで定義できる
+    # 例：肩〜肘〜手首など
+
     return annotated
 
 
@@ -43,17 +78,18 @@ def pose_capture_generator(
     resize_scale: float = 1.0,
     frame_stride: int = 1,
     max_frames: Optional[int] = None,
-) -> Generator[Tuple[int, np.ndarray, np.ndarray, Optional[landmark_pb2.NormalizedLandmarkList]], None, None]:
+    model_asset_path: Optional[str] = None,
+    fallback_fps: float = 30.0,
+) -> Generator[Tuple[int, np.ndarray, np.ndarray, Optional[list]], None, None]:
     """
-    MediaPipe Pose推論を行いながらランドマークを逐次返すジェネレーター。
+    MediaPipe Tasks Pose推論を行いながらランドマークを逐次返すジェネレーター。
     """
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=1,
-        enable_segmentation=False,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    ) as pose:
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        fps = float(fallback_fps) if fallback_fps > 0 else 30.0
+    frame_interval_ms = 1000.0 / fps
+
+    with _create_pose_landmarker(model_asset_path) as landmarker:
         frame_idx = 0
         processed = 0
 
@@ -73,9 +109,12 @@ def pose_capture_generator(
                 frame_for_processing = cv2.resize(frame_bgr, (w, h))
 
             frame_rgb = cv2.cvtColor(frame_for_processing, cv2.COLOR_BGR2RGB)
-            result = pose.process(frame_rgb)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+            timestamp_ms = int(frame_idx * frame_interval_ms)
+            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+            pose_landmarks = result.pose_landmarks[0] if result.pose_landmarks else None
 
-            yield frame_idx, frame_bgr, frame_for_processing, result.pose_landmarks
+            yield frame_idx, frame_bgr, frame_for_processing, pose_landmarks
 
             processed += 1
             frame_idx += 1
@@ -97,6 +136,7 @@ def video_to_pose_csv(
     out_csv_path: str,
     resize_scale: float = 1.0,
     frame_stride: int = 1,
+    model_asset_path: Optional[str] = None,
 ) -> str:
     """
     動画 -> 単一人物の33ランドマークをフレームごとにCSV保存
@@ -119,9 +159,10 @@ def video_to_pose_csv(
                 cap=cap,
                 resize_scale=resize_scale,
                 frame_stride=frame_stride,
+                model_asset_path=model_asset_path,
             ):
                 if landmarks:
-                    for idx, lm in enumerate(landmarks.landmark):
+                    for idx, lm in enumerate(landmarks):
                         writer.writerow((frame_idx, idx, lm.x, lm.y, lm.z, getattr(lm, "visibility", 0.0)))
         finally:
             cap.release()
@@ -140,6 +181,7 @@ def capture_pose_from_camera(
     out_csv_path: Optional[str] = None,
     frame_callback: Optional[Callable[[int, np.ndarray], None]] = None,
     return_start_timestamp: bool = False,
+    model_asset_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Webカメラから一定時間ポーズ推論を行い、ランドマークをDataFrameで返す。
@@ -177,6 +219,8 @@ def capture_pose_from_camera(
             resize_scale=resize_scale,
             frame_stride=frame_stride,
             max_frames=max_frames,
+            fallback_fps=target_fps,
+            model_asset_path=model_asset_path,
         ):
             if frame_callback is not None:
                 frame_rgb = cv2.cvtColor(frame_original_bgr, cv2.COLOR_BGR2RGB)
@@ -184,7 +228,7 @@ def capture_pose_from_camera(
             if landmarks:
                 if start_timestamp is None:
                     start_timestamp = time.time()
-                for idx, lm in enumerate(landmarks.landmark):
+                for idx, lm in enumerate(landmarks):
                     rows.append(
                         (
                             frame_idx,

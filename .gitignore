@@ -1,5 +1,6 @@
-.venv/
 __pycache__/
 *.pyc
+.history/
+.venv/
+*.task
 .DS_Store
-mpl_cache/
